@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, ChangeEvent, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
-import { PlusCircleIcon, TrashIcon, ArrowUpTrayIcon, ArrowDownTrayIcon, ArrowPathIcon, ArrowUturnLeftIcon } from '@heroicons/react/24/solid';
+import { PlusCircleIcon, TrashIcon, ArrowUpTrayIcon, ArrowDownTrayIcon, ArrowUturnLeftIcon, PrinterIcon } from '@heroicons/react/24/solid';
 
 // --- TYPE DEFINITIONS ---
 interface InvoiceItem {
@@ -14,6 +14,13 @@ interface InvoiceItem {
   cgstRate: number;
   sgstRate: number;
   igstRate: number;
+}
+
+// Type declaration for jspdf from CDN
+declare global {
+  interface Window {
+    jspdf: any;
+  }
 }
 
 // --- CONSTANTS ---
@@ -111,7 +118,7 @@ const EditableField: React.FC<EditableFieldProps> = ({ value, onChange, placehol
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className={`bg-transparent p-1 w-full focus:outline-none focus:bg-blue-50/50 rounded-md transition-colors ${className}`}
+        className={`bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md transition-colors ${className}`}
     />
 );
 
@@ -266,75 +273,6 @@ const App: React.FC = () => {
         return '';
     };
 
-
-    // --- LOCALSTORAGE HANDLERS ---
-    const saveInvoice = useCallback(() => {
-        try {
-            const invoiceData = {
-                invoiceDetails,
-                billedTo,
-                shippedTo,
-                items,
-                signature,
-                terms,
-            };
-            localStorage.setItem('invoiceData', JSON.stringify(invoiceData));
-            showNotification('Invoice progress saved successfully!');
-        } catch (error) {
-            console.error("Failed to save invoice:", error);
-            showNotification("Error saving invoice. See console for details.", 'error');
-        }
-    }, [invoiceDetails, billedTo, shippedTo, items, signature, terms]);
-
-    const loadInvoice = useCallback((showAlert = false) => {
-        try {
-            const savedData = localStorage.getItem('invoiceData');
-            if (savedData) {
-                const parsedData = JSON.parse(savedData);
-                setInvoiceDetails(parsedData.invoiceDetails);
-                setBilledTo(parsedData.billedTo);
-                setShippedTo(parsedData.shippedTo);
-                
-                const migratedItems = parsedData.items.map((item: any) => {
-                    if (item.description !== undefined && item.name === undefined) {
-                        item = { ...item, name: item.description, detailedDescription: '', description: undefined };
-                    }
-                    if (item.detailedDescription !== undefined) {
-                        let desc = item.detailedDescription.trim();
-                        if (desc) { 
-                            if (desc.startsWith('(')) desc = desc.substring(1);
-                            if (desc.endsWith(')')) desc = desc.substring(0, desc.length - 1);
-                            item.detailedDescription = `(${desc.trim()})`;
-                        }
-                    } else {
-                        item.detailedDescription = '';
-                    }
-                    return item;
-                });
-                setItems(migratedItems);
-
-                setSignature(parsedData.signature);
-                setTerms(parsedData.terms);
-                if (showAlert) {
-                    showNotification('Invoice loaded successfully!', 'info');
-                }
-            } else {
-                if (showAlert) {
-                    showNotification('No saved invoice data found.', 'info');
-                }
-            }
-        } catch (error) {
-            console.error("Failed to load invoice from localStorage:", error);
-            if (showAlert) {
-                showNotification('Could not load saved invoice. Data might be corrupt.', 'error');
-            }
-        }
-    }, []);
-
-    useEffect(() => {
-        loadInvoice();
-    }, [loadInvoice]);
-    
     // Auto-update Place of Supply from GSTIN
     useEffect(() => {
         const gstin = billedTo.gstin;
@@ -389,14 +327,7 @@ const App: React.FC = () => {
             setItems(initialState.items);
             setSignature(initialState.signature);
             setGstinErrors({ billedTo: '', shippedTo: '' });
-            
-            try {
-                localStorage.removeItem('invoiceData');
-                showNotification('Invoice has been reset and all data cleared.', 'info');
-            } catch (error) {
-                console.error("Failed to clear saved invoice data:", error);
-                showNotification("Reset successful, but failed to clear saved data.", 'error');
-            }
+            showNotification('Invoice has been reset.', 'info');
         }
     };
     
@@ -534,6 +465,7 @@ const App: React.FC = () => {
         return {
             calculatedItems: calculatedItemsWithNumbers.map(item => ({
                 ...item,
+                itemAmount: item.itemAmount,
                 cgstAmount: formatIndianNumber(item.cgstAmount),
                 sgstAmount: formatIndianNumber(item.sgstAmount),
                 igstAmount: formatIndianNumber(item.igstAmount),
@@ -546,6 +478,7 @@ const App: React.FC = () => {
             totalIgst: formatIndianNumber(totalIgst),
             totalTax: formatIndianNumber(totalTax),
             grandTotal: formatIndianNumber(grandTotal),
+            grandTotalNumber: grandTotal,
             grandTotalRounded: Math.round(grandTotal),
         };
     }, [items, isIntraState]);
@@ -553,13 +486,189 @@ const App: React.FC = () => {
     const handlePrint = () => {
         window.print();
     };
+    
+    const handleExportPdf = () => {
+        if (!window.jspdf || !window.jspdf.jsPDF) {
+            showNotification('PDF generation library not loaded. Please refresh and try again.', 'error');
+            return;
+        }
+        
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        const pageHeight = doc.internal.pageSize.height;
+        const pageWidth = doc.internal.pageSize.width;
+        const margin = 15;
+        let y = margin;
+
+        // --- HEADER ---
+        doc.setFontSize(20).setFont('helvetica', 'bold');
+        doc.text('GOODPSYCHE', margin, y);
+
+        doc.setFontSize(22).setFont('helvetica', 'bold');
+        doc.text('Tax Invoice', pageWidth - margin, margin, { align: 'right' });
+        doc.setFontSize(10).setFont('helvetica', 'normal');
+        doc.text('Original Copy', pageWidth - margin, margin + 5, { align: 'right' });
+
+        y += 8;
+        doc.setFontSize(9).setFont('helvetica', 'normal');
+        const companyAddress = 'Basement M-29, Vinoba Puri, Near Round Park Near Parking, Lajpat Nagar New Delhi South East Delhi, 110024';
+        const addressLines = doc.splitTextToSize(companyAddress, 100);
+        doc.text(addressLines, margin, y);
+        y += addressLines.length * 4 + 1;
+        doc.text('GSTIN: 07AAWFG0897P1ZA', margin, y);
+        
+        y += 10;
+        doc.setLineWidth(0.5).line(margin, y, pageWidth - margin, y); // separator line
+        y += 10;
+        
+        // --- PARTY & INVOICE DETAILS ---
+        const leftBlockWidth = (pageWidth / 2) - margin - 5;
+        const rightBlockX = pageWidth / 2 + 5;
+        let leftY = y;
+        let rightY = y;
+        
+        // Left Side: Party Details
+        doc.setFontSize(10).setFont('helvetica', 'bold').text('Billed to:', margin, leftY);
+        leftY += 5;
+        doc.setFont('helvetica', 'normal');
+        const billedToLines = doc.splitTextToSize(`${billedTo.name}\n${billedTo.address}\nGSTIN: ${billedTo.gstin}`, leftBlockWidth);
+        doc.text(billedToLines, margin, leftY);
+        leftY += billedToLines.length * 4.5 + 5;
+
+        doc.setFont('helvetica', 'bold').text('Shipped to:', margin, leftY);
+        leftY += 5;
+        doc.setFont('helvetica', 'normal');
+        const shippedToLines = doc.splitTextToSize(`${shippedTo.name}\n${shippedTo.address}\nGSTIN: ${shippedTo.gstin}`, leftBlockWidth);
+        doc.text(shippedToLines, margin, leftY);
+        
+        // Right Side: Invoice Details
+        const rightLabelX = rightBlockX;
+        const rightValueX = pageWidth - margin;
+        doc.setFont('helvetica', 'bold').text('Invoice No.:', rightLabelX, rightY);
+        doc.setFont('helvetica', 'normal').text(invoiceDetails.invoiceNo, rightValueX, rightY, { align: 'right' });
+        rightY += 7;
+        doc.setFont('helvetica', 'bold').text('Dated:', rightLabelX, rightY);
+        doc.setFont('helvetica', 'normal').text(invoiceDetails.dated, rightValueX, rightY, { align: 'right' });
+        rightY += 7;
+        doc.setFont('helvetica', 'bold').text('Place of Supply:', rightLabelX, rightY);
+        doc.setFont('helvetica', 'normal').text(invoiceDetails.placeOfSupply, rightValueX, rightY, { align: 'right' });
+        rightY += 7;
+        doc.setFont('helvetica', 'bold').text('Reverse Charge:', rightLabelX, rightY);
+        doc.setFont('helvetica', 'normal').text('N', rightValueX, rightY, { align: 'right' });
+
+        y = Math.max(leftY, rightY) + 15;
+
+        // --- ITEMS TABLE ---
+        const tableHead = isIntraState
+            ? [['S.N.', 'Description', 'HSN', 'Qty', 'Unit', 'Price', 'CGST Rate', 'CGST Amt', 'SGST Rate', 'SGST Amt', 'Amount']]
+            : [['S.N.', 'Description', 'HSN', 'Qty', 'Unit', 'Price', 'IGST Rate', 'IGST Amt', 'Amount']];
+
+        const tableBody = calculations.calculatedItems.map((item, index) => {
+            const description = `${item.name}${item.detailedDescription ? `\n${item.detailedDescription}` : ''}`;
+            return isIntraState
+                ? [
+                    index + 1, description, item.hsn, item.qty, item.unit, formatIndianNumber(item.price, 2),
+                    item.cgstRate, item.cgstAmount, item.sgstRate, item.sgstAmount, item.totalAmount
+                  ]
+                : [
+                    index + 1, description, item.hsn, item.qty, item.unit, formatIndianNumber(item.price, 2),
+                    item.igstRate, item.igstAmount, item.totalAmount
+                  ];
+        });
+        
+        (doc as any).autoTable({
+            head: tableHead, body: tableBody, startY: y, theme: 'grid',
+            headStyles: { fillColor: [230, 230, 230], textColor: 20, fontSize: 8, fontStyle: 'bold' },
+            styles: { fontSize: 8, cellPadding: 1.5 },
+            columnStyles: {
+                0: { cellWidth: 10 },
+                1: { cellWidth: 'auto' },
+                3: { halign: 'right' },
+                5: { halign: 'right' },
+                6: { halign: 'right' },
+                7: { halign: 'right' },
+                8: { halign: 'right' },
+                9: { halign: 'right' },
+                10: { halign: 'right' },
+            }
+        });
+
+        y = (doc as any).autoTable.previous.finalY + 10;
+
+        // --- TOTALS ---
+        const totalsX = pageWidth / 1.7;
+        doc.setFontSize(10).setFont('helvetica', 'normal');
+        doc.text('Taxable Amount:', totalsX, y);
+        doc.text(`₹ ${calculations.taxableAmount}`, pageWidth - margin, y, { align: 'right' });
+        y += 7;
+        if (isIntraState) {
+            doc.text('CGST Amount:', totalsX, y);
+            doc.text(`₹ ${calculations.totalCgst}`, pageWidth - margin, y, { align: 'right' });
+            y += 7;
+            doc.text('SGST Amount:', totalsX, y);
+            doc.text(`₹ ${calculations.totalSgst}`, pageWidth - margin, y, { align: 'right' });
+            y += 7;
+        } else {
+            doc.text('IGST Amount:', totalsX, y);
+            doc.text(`₹ ${calculations.totalIgst}`, pageWidth - margin, y, { align: 'right' });
+            y += 7;
+        }
+        doc.setLineWidth(0.2).line(totalsX - 5, y - 2, pageWidth - margin, y - 2);
+        doc.setFontSize(11).setFont('helvetica', 'bold');
+        doc.text('Grand Total:', totalsX, y);
+        doc.text(`₹ ${calculations.grandTotal}`, pageWidth - margin, y, { align: 'right' });
+        y += 10;
+        
+        // --- AMOUNT IN WORDS ---
+        doc.setFontSize(10).setFont('helvetica', 'normal');
+        const amountInWords = `Rupees ${numberToWords(calculations.grandTotalRounded)}`;
+        const wrappedAmount = doc.splitTextToSize(amountInWords, pageWidth - margin * 2);
+        doc.text('Amount in Words:', margin, y);
+        doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, y + 5);
+        y += wrappedAmount.length * 5 + 10;
+        
+        // --- FOOTER ---
+        if (y > pageHeight - 50) {
+            doc.addPage();
+            y = margin;
+        }
+        
+        doc.setLineWidth(0.5).line(margin, y, pageWidth - margin, y);
+        y += 7;
+        
+        const footerLeftX = margin;
+        const footerRightX = pageWidth - margin;
+        
+        doc.setFontSize(9).setFont('helvetica', 'bold').text('Terms & Conditions', footerLeftX, y);
+        y += 5;
+        doc.setFontSize(8).setFont('helvetica', 'normal');
+        const termsLines = doc.splitTextToSize(terms, (pageWidth / 2) - 20);
+        doc.text(termsLines, footerLeftX, y);
+
+        doc.setFont('helvetica', 'bold').setFontSize(10).text('For GOODPSYCHE', footerRightX, y + 5, { align: 'right' });
+        
+        if (signature) {
+            const imgType = signature.substring(signature.indexOf('/') + 1, signature.indexOf(';')).toUpperCase();
+            doc.addImage(signature, imgType, footerRightX - 50, y + 10, 50, 20);
+        }
+        
+        y += 40;
+        doc.setLineWidth(0.2).line(footerRightX - 60, y, footerRightX, y);
+        y += 5;
+        doc.setFont('helvetica', 'bold').setFontSize(10).text('Authorised Signatory', footerRightX, y, { align: 'right' });
+        
+        // --- SAVE ---
+        doc.save(`Invoice-${invoiceDetails.invoiceNo || 'draft'}.pdf`);
+        showNotification('PDF exported successfully!', 'success');
+    };
 
 
     return (
         <div className="bg-gray-100 min-h-screen p-4 sm:p-8 font-sans">
              {notification && (
                 <div 
-                  className={`no-print fixed top-5 right-5 p-4 rounded-lg shadow-lg text-white z-50 transition-transform transform ${
+                  className={`no-print fixed top-5 right-5 p-4 rounded-lg shadow-lg text-white z-60 transition-transform transform ${
                     notification ? 'translate-x-0' : 'translate-x-full'
                   } ${notificationBgClasses[notification.type]}`}
                 >
@@ -627,7 +736,7 @@ const App: React.FC = () => {
                     <div className="text-sm text-gray-700 space-y-2">
                         <div className="flex justify-between">
                             <span className="font-semibold">Invoice No.:</span>
-                            <EditableField value={invoiceDetails.invoiceNo} onChange={(e) => setInvoiceDetails({...invoiceDetails, invoiceNo: e.target.value})} className="text-right" />
+                            <EditableField value={invoiceDetails.invoiceNo} onChange={(e) => setInvoiceDetails({...invoiceDetails, invoiceNo: e.target.value})} className="text-right w-full" />
                         </div>
                         <div className="flex justify-between">
                             <span className="font-semibold">Dated:</span>
@@ -635,7 +744,7 @@ const App: React.FC = () => {
                         </div>
                         <div className="flex justify-between">
                             <span className="font-semibold">Place of Supply:</span>
-                             <EditableField value={invoiceDetails.placeOfSupply} onChange={(e) => setInvoiceDetails({...invoiceDetails, placeOfSupply: e.target.value})} className="text-right" />
+                             <EditableField value={invoiceDetails.placeOfSupply} onChange={(e) => setInvoiceDetails({...invoiceDetails, placeOfSupply: e.target.value})} className="text-right w-full" />
                         </div>
                         <div className="flex justify-between">
                             <span className="font-semibold">Reverse Charge:</span>
@@ -650,52 +759,52 @@ const App: React.FC = () => {
                         <table className="w-full text-sm text-left text-gray-500">
                             <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-y">
                                 <tr>
-                                    <th scope="col" className="px-4 py-3 w-10">S.N.</th>
-                                    <th scope="col" className="px-4 py-3 min-w-[200px]">Description of Goods</th>
-                                    <th scope="col" className="px-4 py-3">HSN/SAC</th>
-                                    <th scope="col" className="px-4 py-3 text-right">Qty</th>
-                                    <th scope="col" className="px-4 py-3">Unit</th>
-                                    <th scope="col" className="px-4 py-3 text-right">Price</th>
+                                    <th scope="col" className="px-1 py-3 w-10">S.N.</th>
+                                    <th scope="col" className="px-1 py-3 min-w-[200px]">Description of Goods</th>
+                                    <th scope="col" className="px-1 py-3 w-20">HSN/SAC</th>
+                                    <th scope="col" className="px-1 py-3 text-right">Qty</th>
+                                    <th scope="col" className="px-1 py-3">Unit</th>
+                                    <th scope="col" className="px-1 py-3 text-right">Price</th>
                                     {isIntraState ? (
                                         <>
-                                            <th scope="col" className="px-4 py-3 text-center" colSpan={2}>CGST</th>
-                                            <th scope="col" className="px-4 py-3 text-center" colSpan={2}>SGST</th>
+                                            <th scope="col" className="px-1 py-3 text-center" colSpan={2}>CGST</th>
+                                            <th scope="col" className="px-1 py-3 text-center" colSpan={2}>SGST</th>
                                         </>
                                     ) : (
-                                        <th scope="col" className="px-4 py-3 text-center" colSpan={4}>IGST</th>
+                                        <th scope="col" className="px-1 py-3 text-center" colSpan={4}>IGST</th>
                                     )}
-                                    <th scope="col" className="px-4 py-3 text-right">Amount (₹)</th>
+                                    <th scope="col" className="px-1 py-3 text-right">Amount (₹)</th>
                                     <th scope="col" className="px-1 py-3 no-print"></th>
                                 </tr>
                                  <tr className="text-xs text-gray-700 bg-gray-100">
-                                    <th className="px-4 py-1"></th>
-                                    <th className="px-4 py-1"></th>
-                                    <th className="px-4 py-1"></th>
-                                    <th className="px-4 py-1"></th>
-                                    <th className="px-4 py-1"></th>
-                                    <th className="px-4 py-1"></th>
+                                    <th className="px-1 py-1"></th>
+                                    <th className="px-1 py-1"></th>
+                                    <th className="px-1 py-1"></th>
+                                    <th className="px-1 py-1"></th>
+                                    <th className="px-1 py-1"></th>
+                                    <th className="px-1 py-1"></th>
                                     {isIntraState ? (
                                         <>
-                                            <th className="px-2 py-1 text-center border-l">Rate</th>
-                                            <th className="px-2 py-1 text-right border-l">Amount</th>
-                                            <th className="px-2 py-1 text-center border-l">Rate</th>
-                                            <th className="px-2 py-1 text-right border-l">Amount</th>
+                                            <th className="px-1 py-1 text-center border-l">Rate (%)</th>
+                                            <th className="px-1 py-1 text-right border-l">Amount</th>
+                                            <th className="px-1 py-1 text-center border-l">Rate (%)</th>
+                                            <th className="px-1 py-1 text-right border-l">Amount</th>
                                         </>
                                      ) : (
                                         <>
-                                            <th className="px-2 py-1 text-center border-l" colSpan={2}>Rate</th>
-                                            <th className="px-2 py-1 text-right border-l" colSpan={2}>Amount</th>
+                                            <th className="px-1 py-1 text-center border-l" colSpan={2}>Rate (%)</th>
+                                            <th className="px-1 py-1 text-right border-l" colSpan={2}>Amount</th>
                                         </>
                                      )}
-                                    <th className="px-4 py-1"></th>
+                                    <th className="px-1 py-1"></th>
                                     <th className="px-1 py-1 no-print"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {calculations.calculatedItems.map((item, index) => (
                                     <tr key={item.id} className="border-b hover:bg-gray-50">
-                                        <td className="px-4 py-2">{index + 1}</td>
-                                        <td className="px-4 py-2">
+                                        <td className="px-1 py-2">{index + 1}</td>
+                                        <td className="px-1 py-2">
                                             <EditableTextarea 
                                                 value={item.name} 
                                                 onChange={(e) => handleItemChange(item.id, 'name', e.target.value)} 
@@ -710,40 +819,40 @@ const App: React.FC = () => {
                                                 className="text-xs italic w-full text-gray-500"
                                             />
                                         </td>
-                                        <td className="px-4 py-2">
-                                            <EditableField value={item.hsn} onChange={(e) => handleItemChange(item.id, 'hsn', e.target.value)} />
+                                        <td className="px-1 py-2">
+                                            <EditableField value={item.hsn} onChange={(e) => handleItemChange(item.id, 'hsn', e.target.value)} className="w-full" />
                                         </td>
-                                        <td className="px-4 py-2 text-right">
+                                        <td className="px-1 py-2 text-right">
                                             <EditableNumberField value={item.qty} onChange={(newValue) => handleItemChange(item.id, 'qty', newValue)} className="w-20 text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} />
                                         </td>
-                                        <td className="px-4 py-2">
-                                            <EditableField value={item.unit} onChange={(e) => handleItemChange(item.id, 'unit', e.target.value)} />
+                                        <td className="px-1 py-2">
+                                            <EditableField value={item.unit} onChange={(e) => handleItemChange(item.id, 'unit', e.target.value)} className="w-full" />
                                         </td>
-                                        <td className="px-4 py-2 text-right">
+                                        <td className="px-1 py-2 text-right">
                                             <EditableNumberField value={item.price} onChange={(newValue) => handleItemChange(item.id, 'price', newValue)} className="w-24 text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={2} />
                                         </td>
                                         
                                         {isIntraState ? (
                                             <>
-                                                <td className="px-2 py-2 border-l">
-                                                    <input type="number" value={item.cgstRate} onChange={(e) => handleItemChange(item.id, 'cgstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />%
+                                                <td className="px-1 py-2 border-l">
+                                                    <input type="number" value={item.cgstRate} onChange={(e) => handleItemChange(item.id, 'cgstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />
                                                 </td>
-                                                <td className="px-2 py-2 text-right border-l tabular-nums">{item.cgstAmount}</td>
-                                                <td className="px-2 py-2 border-l">
-                                                    <input type="number" value={item.sgstRate} onChange={(e) => handleItemChange(item.id, 'sgstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />%
+                                                <td className="px-1 py-2 text-right border-l tabular-nums">{item.cgstAmount}</td>
+                                                <td className="px-1 py-2 border-l">
+                                                    <input type="number" value={item.sgstRate} onChange={(e) => handleItemChange(item.id, 'sgstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />
                                                 </td>
-                                                <td className="px-2 py-2 text-right border-l tabular-nums">{item.sgstAmount}</td>
+                                                <td className="px-1 py-2 text-right border-l tabular-nums">{item.sgstAmount}</td>
                                             </>
                                         ) : (
                                             <>
-                                                <td className="px-2 py-2 border-l text-center" colSpan={2}>
-                                                    <input type="number" value={item.igstRate} onChange={(e) => handleItemChange(item.id, 'igstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />%
+                                                <td className="px-1 py-2 border-l text-center" colSpan={2}>
+                                                    <input type="number" value={item.igstRate} onChange={(e) => handleItemChange(item.id, 'igstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />
                                                 </td>
-                                                <td className="px-2 py-2 text-right border-l tabular-nums" colSpan={2}>{item.igstAmount}</td>
+                                                <td className="px-1 py-2 text-right border-l tabular-nums" colSpan={2}>{item.igstAmount}</td>
                                             </>
                                         )}
                                         
-                                        <td className="px-4 py-2 text-right font-semibold tabular-nums">{item.totalAmount}</td>
+                                        <td className="px-1 py-2 text-right font-semibold tabular-nums">{item.totalAmount}</td>
                                         <td className="px-1 py-2 no-print">
                                             <button onClick={() => removeItem(item.id)} className="text-red-500 hover:text-red-700">
                                                 <TrashIcon className="w-4 h-4" />
@@ -848,29 +957,29 @@ const App: React.FC = () => {
             </div>
 
             {/* Action Buttons */}
-            <div className="no-print fixed bottom-0 right-0 p-6 flex flex-col items-end space-y-4 z-40">
+            <div className="no-print fixed bottom-0 right-0 p-6 flex flex-col items-end space-y-4 z-50">
                  <div className="relative group flex justify-center">
                     <button 
-                        onClick={handlePrint} 
+                        onClick={handleExportPdf} 
                         className="bg-green-600 text-white rounded-full p-4 shadow-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-transform hover:scale-105"
-                        aria-label="Save as PDF"
+                        aria-label="Download PDF"
                     >
                         <ArrowDownTrayIcon className="h-6 w-6" />
                     </button>
                     <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 w-auto min-w-max px-3 py-1.5 bg-gray-700 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                        Save as PDF
+                        Download PDF
                     </span>
                 </div>
                  <div className="relative group flex justify-center">
                     <button 
-                        onClick={() => loadInvoice(true)}
-                        className="bg-yellow-500 text-white rounded-full p-4 shadow-lg hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-400 transition-transform hover:scale-105"
-                        aria-label="Load Invoice"
+                        onClick={handlePrint} 
+                        className="bg-blue-600 text-white rounded-full p-4 shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform hover:scale-105"
+                        aria-label="Print Invoice"
                     >
-                        <ArrowPathIcon className="h-6 w-6" />
+                        <PrinterIcon className="h-6 w-6" />
                     </button>
-                     <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 w-auto min-w-max px-3 py-1.5 bg-gray-700 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                        Load Invoice
+                    <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 w-auto min-w-max px-3 py-1.5 bg-gray-700 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+                        Print Invoice
                     </span>
                 </div>
                  <div className="relative group flex justify-center">
