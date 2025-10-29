@@ -1,0 +1,5 @@
+{
+  "name": "React Invoice Generator",
+  "description": "A web application to generate professional invoices. Users can add multiple line items, customize party details, calculate taxes, and print the final invoice. It also includes a feature to attach a digital signature image.",
+  "requestFramePermissions": []
+}
