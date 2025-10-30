@@ -400,7 +400,7 @@ const App: React.FC = () => {
     // Auto-fill Shipped to details from Billed to details (with manual override)
     useEffect(() => {
         const prevBilledTo = prevBilledToRef.current;
-        if (JSON.stringify(shippedTo) === JSON.stringify(prevBilledTo)) {
+        if (JSON.stringify(shippedTo) === JSON.stringify(prevBilledTo)) { // only auto-fill if shippedTo hasn't been manually changed from default
             setShippedTo(billedTo);
         }
         prevBilledToRef.current = billedTo;
@@ -781,39 +781,38 @@ const App: React.FC = () => {
         
         const tableBody: any[] = [];
         calculations.calculatedItems.forEach((item, index) => {
-            if (item.subItems.length > 0) {
-                // Main Item Header Row (bold, no background, no totals)
-                let mainItemContent = item.name;
-                if (item.description) {
-                    mainItemContent += `\n${item.description}`;
+            // Main Item Header Row (bold, no background, no totals)
+            let mainItemContent = item.name;
+            if (item.description) {
+                mainItemContent += `\n${item.description}`;
+            }
+
+            tableBody.push([
+                { content: index + 1, styles: { fontStyle: 'bold', fillColor: [255, 255, 255] } }, // S.N.
+                { content: mainItemContent, colSpan: isIntraState ? 10 : 9, styles: { fontStyle: 'bold', halign: 'left', fillColor: [255, 255, 255] } }, // DESCRIPTION to TOTAL
+            ]);
+
+            item.calculatedSubItems.forEach(subItem => {
+                let description = subItem.name;
+                if (subItem.description) {
+                    description += `\n${subItem.description}`;
                 }
-
-                tableBody.push([
-                    { content: index + 1, styles: { fontStyle: 'bold', fillColor: [255, 255, 255] } }, // S.N.
-                    { content: mainItemContent, colSpan: isIntraState ? 10 : 9, styles: { fontStyle: 'bold', halign: 'left', fillColor: [255, 255, 255] } }, // DESCRIPTION to TOTAL
-                ]);
-
-
-                item.calculatedSubItems.forEach(subItem => {
-                    let description = subItem.name;
-                    if (subItem.description) {
-                        description += `\n${subItem.description}`;
-                    }
-                    if (isIntraState) {
-                         tableBody.push(['', description, subItem.hsn, subItem.qty ?? '', subItem.unit, formatIndianNumber(subItem.price, 0), subItem.itemAmount, subItem.cgstRate, subItem.cgstAmount, subItem.sgstAmount, subItem.totalAmount]);
-                    } else {
-                         tableBody.push(['', description, subItem.hsn, subItem.qty ?? '', subItem.unit, formatIndianNumber(subItem.price, 0), subItem.itemAmount, subItem.igstRate, subItem.igstAmount, subItem.totalAmount]);
-                    }
-                });
-                
-                // Sub-item Group Total Row (after sub-items)
-                const groupTotalRowStyle = { fontStyle: 'bold', fillColor: [255, 255, 255], textColor: 50 }; // No background for group total
-                const groupTotalContent = `Group Total for ${item.name}`;
-
+                if (isIntraState) {
+                     tableBody.push(['', description, subItem.hsn, subItem.qty ?? '', subItem.unit, formatIndianNumber(subItem.price, 0), subItem.itemAmount, subItem.cgstRate, subItem.cgstAmount, subItem.sgstAmount, subItem.totalAmount]);
+                } else {
+                     tableBody.push(['', description, subItem.hsn, subItem.qty ?? '', subItem.unit, formatIndianNumber(subItem.price, 0), subItem.itemAmount, subItem.igstRate, subItem.igstAmount, subItem.totalAmount]);
+                }
+            });
+            
+            if (item.subItems.length > 0) {
                 // Add empty row for spacing
                 tableBody.push([
                     { content: '', colSpan: isIntraState ? 11 : 10, styles: { fillColor: [255, 255, 255], minCellHeight: 3 } }
                 ]);
+
+                // Sub-item Group Total Row (after sub-items)
+                const groupTotalRowStyle = { fontStyle: 'bold', fillColor: [255, 255, 255], textColor: 50 }; // No background for group total
+                const groupTotalContent = `Group Total for ${item.name}`;
 
                 if (isIntraState) {
                     tableBody.push([
@@ -833,18 +832,6 @@ const App: React.FC = () => {
                         { content: item.totalAmount, styles: { ...groupTotalRowStyle, halign: 'right' } }, // Total
                     ]);
                 }
-
-
-            } else {
-                let mainItemContent = item.name;
-                if (item.description) {
-                    mainItemContent += `\n${item.description}`;
-                }
-                 if (isIntraState) {
-                    tableBody.push([index + 1, mainItemContent, item.hsn, item.qty ?? '', item.unit, formatIndianNumber(item.price, 0), item.itemAmount, item.cgstRate, item.cgstAmount, item.sgstAmount, item.totalAmount]);
-                 } else {
-                    tableBody.push([index + 1, mainItemContent, item.hsn, item.qty ?? '', item.unit, formatIndianNumber(item.price, 0), item.itemAmount, item.igstRate, item.igstAmount, item.totalAmount]);
-                 }
             }
         });
         
@@ -1158,7 +1145,8 @@ const App: React.FC = () => {
                                                     <td className="px-2 py-2 text-right font-semibold text-gray-800">{item.totalAmount}</td>
                                                 </>
                                             ) : (
-                                                <td colSpan={isIntraState ? 8 : 7}></td> // Span empty cells if sub-items exist
+                                                // If sub-items exist, these cells are empty for the main item
+                                                <td colSpan={isIntraState ? 8 : 7}></td> 
                                             )}
                                             <td className="p-1 text-center no-print">
                                                 <button onClick={() => removeItem(item.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100"><TrashIcon className="h-5 w-5" /></button>
@@ -1201,6 +1189,31 @@ const App: React.FC = () => {
                                             </td>
                                         </tr>
                                     ))}
+                                    {item.subItems.length > 0 && (
+                                        <>
+                                        {/* Visual space after sub-item group */}
+                                        <tr className="h-2 no-print">
+                                            <td colSpan={isIntraState ? 12 : 11}></td>
+                                        </tr>
+                                        {/* Sub-item Group Total Row */}
+                                        <tr className="border-b font-bold text-gray-800 bg-gray-50 align-top">
+                                            <td className="px-2 py-2 text-center"></td>
+                                            <td className="px-2 py-2 text-right" colSpan={isIntraState ? 7 : 6}>
+                                                Group Total for {item.name}
+                                            </td>
+                                            {isIntraState ? (
+                                                <>
+                                                    <td className="px-1 py-2 text-right">{item.mainItemCgst}</td>
+                                                    <td className="px-1 py-2 text-right">{item.mainItemSgst}</td>
+                                                </>
+                                            ) : (
+                                                <td className="px-1 py-2 text-right">{item.mainItemIgst}</td>
+                                            )}
+                                            <td className="px-2 py-2 text-right">{item.totalAmount}</td>
+                                            <td className="p-1 text-center no-print"></td>
+                                        </tr>
+                                        </>
+                                    )}
                                 </React.Fragment>
                             ))}
                         </tbody>
@@ -1224,7 +1237,7 @@ const App: React.FC = () => {
                                 <p><strong className="text-gray-700">IFSC:</strong> ICICI0000831</p>
                                 <p><strong className="text-gray-700">BANK:</strong> ICICI Bank</p>
                                 <p><strong className="text-gray-700">Branch:</strong> Laxmi Nagar</p>
-                                <p><strong className="text-gray-700">UPI ID:</strong> goodpsyche.ibz@icici</p>
+                                <p><strong className="text-gray-700">UPI ID:</strong> goodpsyche.ibz@ici</p>
                             </div>
                         </div>
                         <div>
