@@ -1,13 +1,12 @@
 import React, { useState, useMemo, useCallback, ChangeEvent, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
-import { PlusCircleIcon, TrashIcon, ArrowUpTrayIcon, ArrowDownTrayIcon, ArrowUturnLeftIcon, PrinterIcon } from '@heroicons/react/24/solid';
+import { PlusCircleIcon, TrashIcon, ArrowUturnLeftIcon, PrinterIcon } from '@heroicons/react/24/solid';
 
 // --- TYPE DEFINITIONS ---
-interface InvoiceItem {
+interface SubItem {
   id: string;
-  name: string;
-  subItemName: string | null;
-  detailedDescription: string | null;
+  name: string; // Sub-item name
+  description: string | null;
   hsn: string;
   qty: number | null;
   unit: string;
@@ -16,6 +15,22 @@ interface InvoiceItem {
   sgstRate: number;
   igstRate: number;
 }
+
+interface InvoiceItem {
+  id:string;
+  name: string; // Main item name
+  description: string | null;
+  subItems: SubItem[];
+  // These are used ONLY if subItems is empty
+  hsn: string;
+  qty: number | null;
+  unit: string;
+  price: number;
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
+}
+
 
 interface AdjustmentItem {
   id: string;
@@ -58,7 +73,7 @@ const capitalizeFirstLetter = (str: string): string => {
     return str.charAt(0).toUpperCase() + str.slice(1);
 };
 
-const formatIndianNumber = (numStr: string | number, decimalPlaces = 2): string => {
+const formatIndianNumber = (numStr: string | number, decimalPlaces = 0): string => {
     const num = Number(numStr);
     if (isNaN(num)) return typeof numStr === 'string' ? numStr : (decimalPlaces > 0 ? '0.' + '0'.repeat(decimalPlaces) : '0');
 
@@ -170,7 +185,7 @@ interface EditableNumberFieldProps {
     decimalPlaces?: number;
 }
 
-const EditableNumberField: React.FC<EditableNumberFieldProps> = ({ value, onChange, className = '', decimalPlaces = 2 }) => {
+const EditableNumberField: React.FC<EditableNumberFieldProps> = ({ value, onChange, className = '', decimalPlaces = 0 }) => {
     const [localString, setLocalString] = useState(String(value));
     const [isFocused, setIsFocused] = useState(false);
 
@@ -307,11 +322,20 @@ const App: React.FC = () => {
         shippedTo: { name: '', address: '', gstin: '' },
         items: [{
             id: Date.now().toString(),
-            name: '', subItemName: null, detailedDescription: null, hsn: '', qty: null, unit: '', price: 0, cgstRate: 9, sgstRate: 9, igstRate: 18
+            name: '',
+            description: null,
+            subItems: [],
+            hsn: '', 
+            qty: null,
+            unit: '', 
+            price: 0,
+            cgstRate: 9, 
+            sgstRate: 9, 
+            igstRate: 18,
         }] as InvoiceItem[],
         preTaxItems: [] as AdjustmentItem[],
         postTaxItems: [] as AdjustmentItem[],
-        terms: `1. Goods once sold will not be taken back.\n2. Interest @ 18% p.a. will be charged if the payment is not made with in the stipulated time.\n3. Subject to 'Delhi' Jurisdiction only.`,
+        terms: `1. Goods once sold will not be taken back.\n2. Interest @ 18% p.a. will be charged if the payment is not made within the stipulated time.\n3. Subject to 'Delhi' Jurisdiction only.`,
         invoiceTitle: 'Tax Invoice',
         invoiceSubtitle: 'Original Copy',
     });
@@ -386,15 +410,25 @@ const App: React.FC = () => {
     useEffect(() => {
         setItems(prevItems =>
             prevItems.map(item => {
+                const updatedSubItems = item.subItems.map(subItem => {
+                    if (isIntraState) {
+                        const newRate = subItem.igstRate / 2;
+                        return { ...subItem, cgstRate: newRate, sgstRate: newRate };
+                    } else {
+                        const newRate = subItem.cgstRate + subItem.sgstRate;
+                        return { ...subItem, igstRate: newRate };
+                    }
+                });
+
+                let updatedItem = { ...item, subItems: updatedSubItems };
                 if (isIntraState) {
-                    // Switched to Intra-State (CGST/SGST) from IGST
                     const newRate = item.igstRate / 2;
-                    return { ...item, cgstRate: newRate, sgstRate: newRate };
+                    updatedItem = { ...updatedItem, cgstRate: newRate, sgstRate: newRate };
                 } else {
-                    // Switched to Inter-State (IGST) from CGST/SGST
                     const newRate = item.cgstRate + item.sgstRate;
-                    return { ...item, igstRate: newRate };
+                    updatedItem = { ...updatedItem, igstRate: newRate };
                 }
+                return updatedItem;
             })
         );
     }, [isIntraState]);
@@ -429,8 +463,8 @@ const App: React.FC = () => {
             setShippedTo(prev => ({ ...prev, gstin: upperValue }));
         }
     };
-
-    const handleItemChange = (id: string, field: keyof InvoiceItem | 'csgstRate', value: string | number | null) => {
+    
+    const handleItemChange = (id: string, field: keyof Omit<InvoiceItem, 'subItems' | 'id'> | 'csgstRate', value: any) => {
         setItems(prevItems =>
             prevItems.map(item => {
                 if (item.id === id) {
@@ -450,13 +484,33 @@ const App: React.FC = () => {
             })
         );
     };
+    
+    const handleSubItemChange = (itemId: string, subItemId: string, field: keyof Omit<SubItem, 'id'> | 'csgstRate', value: any) => {
+        setItems(items.map(item => {
+            if (item.id === itemId) {
+                const updatedSubItems = item.subItems.map(si => {
+                    if (si.id === subItemId) {
+                        if (field === 'csgstRate') {
+                            const rate = Number(value);
+                            return { ...si, cgstRate: rate, sgstRate: rate };
+                        }
+                        return { ...si, [field as keyof SubItem]: value };
+                    }
+                    return si;
+                });
+                return { ...item, subItems: updatedSubItems };
+            }
+            return item;
+        }));
+    };
+
 
     const addItem = () => {
         const newItem: InvoiceItem = {
             id: Date.now().toString(),
             name: '',
-            subItemName: null,
-            detailedDescription: null,
+            description: null,
+            subItems: [],
             hsn: '',
             qty: null,
             unit: '',
@@ -470,6 +524,36 @@ const App: React.FC = () => {
 
     const removeItem = (id: string) => {
         setItems(prevItems => prevItems.filter(item => item.id !== id));
+    };
+
+    const addSubItem = (itemId: string) => {
+        setItems(items.map(item => {
+            if (item.id === itemId) {
+                const newSubItem: SubItem = {
+                    id: Date.now().toString(),
+                    name: '',
+                    description: null,
+                    hsn: '',
+                    qty: null,
+                    unit: '',
+                    price: 0,
+                    cgstRate: item.cgstRate, // Inherit tax from parent
+                    sgstRate: item.sgstRate,
+                    igstRate: item.igstRate,
+                };
+                return { ...item, subItems: [...item.subItems, newSubItem] };
+            }
+            return item;
+        }));
+    };
+
+    const removeSubItem = (itemId: string, subItemId: string) => {
+        setItems(items.map(item => {
+            if (item.id === itemId) {
+                return { ...item, subItems: item.subItems.filter(si => si.id !== subItemId) };
+            }
+            return item;
+        }));
     };
 
     const addPreTaxItem = () => setPreTaxItems([...preTaxItems, { id: Date.now().toString(), name: 'Discount', amount: 0, operation: 'subtract' }]);
@@ -490,38 +574,62 @@ const App: React.FC = () => {
         let totalCgst = 0;
         let totalSgst = 0;
         let totalIgst = 0;
-        let totalQty = 0;
 
         const calculatedItemsWithNumbers = items.map(item => {
-            const itemQty = item.qty ?? 1;
-            const itemAmount = itemQty * item.price;
-            let cgstAmount = 0;
-            let sgstAmount = 0;
-            let igstAmount = 0;
-            
-            if (isIntraState) {
-                cgstAmount = itemAmount * (item.cgstRate / 100);
-                sgstAmount = itemAmount * (item.sgstRate / 100);
+            let mainItemTotal = 0;
+            let mainItemCgst = 0;
+            let mainItemSgst = 0;
+            let mainItemIgst = 0;
+            let calculatedSubItems = [];
+
+            if (item.subItems.length > 0) {
+                calculatedSubItems = item.subItems.map(subItem => {
+                    const itemQty = subItem.qty ?? 1;
+                    const itemAmount = itemQty * subItem.price;
+                    let cgstAmount = 0, sgstAmount = 0, igstAmount = 0;
+
+                    if (isIntraState) {
+                        cgstAmount = itemAmount * (subItem.cgstRate / 100);
+                        sgstAmount = itemAmount * (subItem.sgstRate / 100);
+                    } else {
+                        igstAmount = itemAmount * (subItem.igstRate / 100);
+                    }
+                    const totalTaxOnSubItem = cgstAmount + sgstAmount + igstAmount;
+                    const totalAmount = itemAmount + totalTaxOnSubItem;
+
+                    mainItemTotal += totalAmount; // Sum of sub-item totals
+                    mainItemCgst += cgstAmount; // Sum of sub-item CGST
+                    mainItemSgst += sgstAmount; // Sum of sub-item SGST
+                    mainItemIgst += igstAmount; // Sum of sub-item IGST
+
+                    subtotal += itemAmount;
+                    totalCgst += cgstAmount;
+                    totalSgst += sgstAmount;
+                    totalIgst += igstAmount;
+
+                    return { ...subItem, itemAmount, cgstAmount, sgstAmount, igstAmount, totalAmount };
+                });
             } else {
-                igstAmount = itemAmount * (item.igstRate / 100);
+                const itemQty = item.qty ?? 1;
+                const itemAmount = item.price * itemQty;
+                let cgstAmount = 0, sgstAmount = 0, igstAmount = 0;
+
+                if (isIntraState) {
+                    cgstAmount = itemAmount * (item.cgstRate / 100);
+                    sgstAmount = itemAmount * (item.sgstRate / 100);
+                } else {
+                    igstAmount = itemAmount * (item.igstRate / 100);
+                }
+                const totalTaxOnItem = cgstAmount + sgstAmount + igstAmount;
+                mainItemTotal = itemAmount + totalTaxOnItem; // For single item, this is its own total
+
+                subtotal += itemAmount;
+                totalCgst += cgstAmount;
+                totalSgst += sgstAmount;
+                totalIgst += igstAmount;
             }
 
-            const totalAmount = itemAmount + cgstAmount + sgstAmount + igstAmount;
-
-            subtotal += itemAmount;
-            totalQty += itemQty;
-            totalCgst += cgstAmount;
-            totalSgst += sgstAmount;
-            totalIgst += igstAmount;
-
-            return {
-                ...item,
-                itemAmount,
-                cgstAmount,
-                sgstAmount,
-                igstAmount,
-                totalAmount,
-            };
+            return { ...item, calculatedSubItems, totalAmount: mainItemTotal, mainItemCgst, mainItemSgst, mainItemIgst };
         });
         
         const preTaxAdjustmentTotal = preTaxItems.reduce((acc, item) => {
@@ -546,15 +654,38 @@ const App: React.FC = () => {
         const amountDue = grandTotal + postTaxAdjustmentTotal;
 
         return {
-            calculatedItems: calculatedItemsWithNumbers.map(item => ({
-                ...item,
-                itemAmount: item.itemAmount,
-                cgstAmount: formatIndianNumber(item.cgstAmount, 0),
-                sgstAmount: formatIndianNumber(item.sgstAmount, 0),
-                igstAmount: formatIndianNumber(item.igstAmount, 0),
-                totalAmount: formatIndianNumber(item.totalAmount, 0),
-            })),
-            totalQty,
+            calculatedItems: calculatedItemsWithNumbers.map(item => {
+                const itemQty = item.qty ?? 1;
+                const itemAmount = item.price * itemQty;
+                let cgstAmount = 0, sgstAmount = 0, igstAmount = 0;
+                 if (item.subItems.length === 0) { // Only calculate for single items here, sub-item totals are already in mainItemCgst etc.
+                     if (isIntraState) {
+                        cgstAmount = itemAmount * (item.cgstRate / 100);
+                        sgstAmount = itemAmount * (item.sgstRate / 100);
+                    } else {
+                        igstAmount = itemAmount * (item.igstRate / 100);
+                    }
+                 }
+                return {
+                    ...item,
+                    itemAmount: formatIndianNumber(itemAmount, 0),
+                    cgstAmount: formatIndianNumber(cgstAmount, 0),
+                    sgstAmount: formatIndianNumber(sgstAmount, 0),
+                    igstAmount: formatIndianNumber(igstAmount, 0),
+                    totalAmount: formatIndianNumber(item.totalAmount, 0), // Already sum of sub-items total for groups, or item total for single item
+                    mainItemCgst: formatIndianNumber(item.mainItemCgst, 0), // Sum of sub-item CGST
+                    mainItemSgst: formatIndianNumber(item.mainItemSgst, 0), // Sum of sub-item SGST
+                    mainItemIgst: formatIndianNumber(item.mainItemIgst, 0), // Sum of sub-item IGST
+                    calculatedSubItems: item.calculatedSubItems.map(si => ({
+                        ...si,
+                        itemAmount: formatIndianNumber(si.itemAmount, 0),
+                        cgstAmount: formatIndianNumber(si.cgstAmount, 0),
+                        sgstAmount: formatIndianNumber(si.sgstAmount, 0),
+                        igstAmount: formatIndianNumber(si.igstAmount, 0),
+                        totalAmount: formatIndianNumber(si.totalAmount, 0),
+                    }))
+                }
+            }),
             subtotal: formatIndianNumber(subtotal, 0),
             taxableAmount: formatIndianNumber(taxableAmount, 0),
             totalCgst: formatIndianNumber(finalTotalCgst, 0),
@@ -562,9 +693,7 @@ const App: React.FC = () => {
             totalIgst: formatIndianNumber(finalTotalIgst, 0),
             totalTax: formatIndianNumber(totalTax, 0),
             grandTotal: formatIndianNumber(grandTotal, 0),
-            grandTotalNumber: grandTotal,
             amountDue: formatIndianNumber(amountDue, 0),
-            amountDueNumber: amountDue,
             amountDueRounded: Math.round(amountDue),
         };
     }, [items, isIntraState, preTaxItems, postTaxItems]);
@@ -647,33 +776,82 @@ const App: React.FC = () => {
 
         // --- ITEMS TABLE ---
         const tableHead = isIntraState
-            ? [['S.N.', 'DESCRIPTION OF GOODS/SERVICES', 'HSN', 'Qty', 'Unit', 'Price', 'CGST Rate', 'CGST Amt', 'SGST Rate', 'SGST Amt', 'Amount']]
-            : [['S.N.', 'DESCRIPTION OF GOODS/SERVICES', 'HSN', 'Qty', 'Unit', 'Price', 'IGST Rate', 'IGST Amt', 'Amount']];
+            ? [['S.N.', 'DESCRIPTION OF GOODS/SERVICES', 'HSN', 'Qty', 'Unit', 'Price', 'Amount', 'Tax %', 'CGST Amt', 'SGST Amt', 'Total']]
+            : [['S.N.', 'DESCRIPTION OF GOODS/SERVICES', 'HSN', 'Qty', 'Unit', 'Price', 'Amount', 'IGST %', 'IGST Amt', 'Total']];
+        
+        const tableBody: any[] = [];
+        calculations.calculatedItems.forEach((item, index) => {
+            if (item.subItems.length > 0) {
+                // Main Item Header Row (bold, no background, no totals)
+                let mainItemContent = item.name;
+                if (item.description) {
+                    mainItemContent += `\n${item.description}`;
+                }
 
-        const tableBody = calculations.calculatedItems.map((item, index) => {
-            let description = item.name;
-            if (item.subItemName) {
-                description += `\n${item.subItemName}`;
-            }
-            if (item.detailedDescription) {
-                description += `\n${item.detailedDescription}`;
-            }
+                tableBody.push([
+                    { content: index + 1, styles: { fontStyle: 'bold', fillColor: [255, 255, 255] } }, // S.N.
+                    { content: mainItemContent, colSpan: isIntraState ? 10 : 9, styles: { fontStyle: 'bold', halign: 'left', fillColor: [255, 255, 255] } }, // DESCRIPTION to TOTAL
+                ]);
 
-            return isIntraState
-                ? [
-                    index + 1, description, item.hsn, item.qty ?? '', item.unit, formatIndianNumber(item.price, 0),
-                    item.cgstRate, item.cgstAmount, item.sgstRate, item.sgstAmount, item.totalAmount
-                  ]
-                : [
-                    index + 1, description, item.hsn, item.qty ?? '', item.unit, formatIndianNumber(item.price, 0),
-                    item.igstRate, item.igstAmount, item.totalAmount
-                  ];
+
+                item.calculatedSubItems.forEach(subItem => {
+                    let description = subItem.name;
+                    if (subItem.description) {
+                        description += `\n${subItem.description}`;
+                    }
+                    if (isIntraState) {
+                         tableBody.push(['', description, subItem.hsn, subItem.qty ?? '', subItem.unit, formatIndianNumber(subItem.price, 0), subItem.itemAmount, subItem.cgstRate, subItem.cgstAmount, subItem.sgstAmount, subItem.totalAmount]);
+                    } else {
+                         tableBody.push(['', description, subItem.hsn, subItem.qty ?? '', subItem.unit, formatIndianNumber(subItem.price, 0), subItem.itemAmount, subItem.igstRate, subItem.igstAmount, subItem.totalAmount]);
+                    }
+                });
+                
+                // Sub-item Group Total Row (after sub-items)
+                const groupTotalRowStyle = { fontStyle: 'bold', fillColor: [255, 255, 255], textColor: 50 }; // No background for group total
+                const groupTotalContent = `Group Total for ${item.name}`;
+
+                // Add empty row for spacing
+                tableBody.push([
+                    { content: '', colSpan: isIntraState ? 11 : 10, styles: { fillColor: [255, 255, 255], minCellHeight: 3 } }
+                ]);
+
+                if (isIntraState) {
+                    tableBody.push([
+                        { content: '', styles: groupTotalRowStyle }, // S.N.
+                        { content: groupTotalContent, colSpan: 6, styles: { ...groupTotalRowStyle, halign: 'right' } }, // DESCRIPTION to AMOUNT
+                        { content: '', styles: groupTotalRowStyle }, // Tax % (empty)
+                        { content: item.mainItemCgst, styles: { ...groupTotalRowStyle, halign: 'right' } }, // CGST Amt
+                        { content: item.mainItemSgst, styles: { ...groupTotalRowStyle, halign: 'right' } }, // SGST Amt
+                        { content: item.totalAmount, styles: { ...groupTotalRowStyle, halign: 'right' } }, // Total
+                    ]);
+                } else { // Inter-state
+                    tableBody.push([
+                        { content: '', styles: groupTotalRowStyle }, // S.N.
+                        { content: groupTotalContent, colSpan: 5, styles: { ...groupTotalRowStyle, halign: 'right' } }, // DESCRIPTION to AMOUNT
+                        { content: '', styles: groupTotalRowStyle }, // IGST % (empty)
+                        { content: item.mainItemIgst, styles: { ...groupTotalRowStyle, halign: 'right' } }, // IGST Amt
+                        { content: item.totalAmount, styles: { ...groupTotalRowStyle, halign: 'right' } }, // Total
+                    ]);
+                }
+
+
+            } else {
+                let mainItemContent = item.name;
+                if (item.description) {
+                    mainItemContent += `\n${item.description}`;
+                }
+                 if (isIntraState) {
+                    tableBody.push([index + 1, mainItemContent, item.hsn, item.qty ?? '', item.unit, formatIndianNumber(item.price, 0), item.itemAmount, item.cgstRate, item.cgstAmount, item.sgstAmount, item.totalAmount]);
+                 } else {
+                    tableBody.push([index + 1, mainItemContent, item.hsn, item.qty ?? '', item.unit, formatIndianNumber(item.price, 0), item.itemAmount, item.igstRate, item.igstAmount, item.totalAmount]);
+                 }
+            }
         });
         
         (doc as any).autoTable({
             head: tableHead, body: tableBody, startY: y, theme: 'grid',
             headStyles: { fillColor: [230, 230, 230], textColor: 20, fontSize: 8, fontStyle: 'bold' },
-            styles: { fontSize: 8, cellPadding: 1.5 },
+            styles: { fontSize: 8, cellPadding: 1.5, valign: 'top' },
             columnStyles: {
                 0: { cellWidth: 10 },
                 1: { cellWidth: 'auto' },
@@ -684,7 +862,7 @@ const App: React.FC = () => {
                 8: { halign: 'right' },
                 9: { halign: 'right' },
                 10: { halign: 'right' },
-            }
+            },
         });
 
         y = (doc as any).autoTable.previous.finalY + 10;
@@ -814,7 +992,7 @@ const App: React.FC = () => {
                     <div className="text-left">
                         <h1 className="text-2xl font-bold text-gray-800 tracking-wider">GOODPSYCHE</h1>
                         <p className="text-sm text-gray-500 max-w-xs">
-                            Basement M-29, Vinoba Puri,, Near Round Park Near Parking, Lajpat Nagar New Delhi South East Delhi, 110024
+                            Basement M-29, Vinoba Puri, Near Round Park Near Parking, Lajpat Nagar New Delhi South East Delhi, 110024
                         </p>
                         <p className="text-sm text-gray-600 mt-2">
                             <span className="font-semibold">GSTIN:</span> 07AAWFG0897P1ZA
@@ -874,7 +1052,7 @@ const App: React.FC = () => {
                             </div>
                          </div>
                     </div>
-                    <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm text-gray-700 items-center">
+                    <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-0.5 text-sm text-gray-700 items-center">
                         <span className="font-semibold whitespace-nowrap">Invoice No.:</span>
                         <EditableField value={invoiceDetails.invoiceNo} onChange={(e) => setInvoiceDetails({...invoiceDetails, invoiceNo: e.target.value})} className="text-right w-full" />
                         
@@ -919,116 +1097,111 @@ const App: React.FC = () => {
                         </thead>
                         <tbody>
                             {calculations.calculatedItems.map((item, index) => (
-                                <tr key={item.id} className="border-b hover:bg-gray-50 align-middle">
-                                    <td className="px-2 py-2 text-center">{index + 1}</td>
-                                    <td className="px-2 py-2">
-                                        <EditableTextarea
-                                            value={item.name}
-                                            onChange={(e) => handleItemChange(item.id, 'name', e.target.value)}
-                                            placeholder="Item Name"
-                                            className="font-semibold text-gray-800"
-                                        />
-                                        <div className="space-y-1">
-                                            {item.subItemName !== null ? (
+                                <React.Fragment key={item.id}>
+                                    {/* RENDER MAIN ITEM ROW (as a simple item or a group header) */}
+                                        <tr className={`border-b align-top ${item.subItems.length > 0 ? 'font-bold' : 'hover:bg-gray-50'}`}>
+                                            <td className="px-2 py-2 text-center">{index + 1}</td>
+                                            <td className="px-2 py-2">
                                                 <EditableTextarea
-                                                    value={item.subItemName}
-                                                    onChange={(e) => handleItemChange(item.id, 'subItemName', e.target.value)}
-                                                    onBlur={(e) => {
-                                                        if (e.target.value.trim() === '') {
-                                                            handleItemChange(item.id, 'subItemName', null);
-                                                        }
-                                                    }}
-                                                    placeholder="(Sub Item)"
-                                                    className="text-sm text-gray-600"
+                                                    value={item.name}
+                                                    onChange={(e) => handleItemChange(item.id, 'name', e.target.value)}
+                                                    placeholder="Item Name"
+                                                    className={`text-gray-800 ${item.subItems.length > 0 ? 'font-bold' : 'font-semibold'}`}
                                                 />
-                                            ) : (
-                                                <button onClick={() => handleItemChange(item.id, 'subItemName', '')} className="no-print text-xs text-blue-500 hover:text-blue-700 mt-1 pl-1">+ Add Sub Item</button>
-                                            )}
-                                            {item.detailedDescription !== null ? (
-                                                <EditableTextarea
-                                                    value={item.detailedDescription}
-                                                    onChange={(e) => handleItemChange(item.id, 'detailedDescription', e.target.value)}
-                                                    onBlur={(e) => {
-                                                        const value = e.target.value.trim();
-                                                        if (value === '') {
-                                                            handleItemChange(item.id, 'detailedDescription', null);
-                                                        } else {
-                                                            const formattedValue = `(${value.replace(/^\(|\)$/g, '')})`;
-                                                            handleItemChange(item.id, 'detailedDescription', formattedValue);
-                                                        }
-                                                    }}
-                                                    placeholder="(Detailed description)"
-                                                    className="text-xs text-gray-500"
-                                                />
-                                            ) : (
-                                                <button onClick={() => handleItemChange(item.id, 'detailedDescription', '')} className="no-print text-xs text-blue-500 hover:text-blue-700 mt-1 pl-1">+ Add Description</button>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="px-1 py-2">
-                                        <EditableField
-                                            value={item.hsn}
-                                            onChange={(e) => handleItemChange(item.id, 'hsn', e.target.value)}
-                                            className="w-full"
-                                        />
-                                    </td>
-                                    <td className="px-1 py-2 text-right">
-                                       <EditableNullableNumberField 
-                                            value={item.qty}
-                                            onChange={(val) => handleItemChange(item.id, 'qty', val)}
-                                            className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
-                                            decimalPlaces={0}
-                                        />
-                                    </td>
-                                    <td className="px-1 py-2">
-                                        <EditableField
-                                            value={item.unit}
-                                            onChange={(e) => handleItemChange(item.id, 'unit', e.target.value)}
-                                            className="w-full"
-                                        />
-                                    </td>
-                                    <td className="px-2 py-2 text-right">
-                                        <EditableNumberField 
-                                            value={item.price}
-                                            onChange={(val) => handleItemChange(item.id, 'price', val)}
-                                            className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
-                                            decimalPlaces={0}
-                                        />
-                                    </td>
-                                    <td className="px-2 py-2 text-right font-medium">{formatIndianNumber(item.itemAmount, 0)}</td>
-                                    {isIntraState ? (
-                                        <>
-                                            <td className="px-1 py-2 text-center border-l">
-                                                <EditableNumberField 
-                                                    value={item.cgstRate}
-                                                    onChange={(val) => handleItemChange(item.id, 'csgstRate', val)}
-                                                    className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
-                                                    decimalPlaces={0}
-                                                />
+                                                {item.description !== null && (
+                                                    <EditableTextarea
+                                                        value={item.description}
+                                                        onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                                                        onBlur={(e) => { if (e.target.value.trim() === '') { handleItemChange(item.id, 'description', null); } }}
+                                                        placeholder="(Description)"
+                                                        className="text-xs text-gray-500"
+                                                    />
+                                                )}
+                                                <div className="no-print mt-1 pl-1 flex items-center space-x-4">
+                                                    {item.description === null && (
+                                                        <button onClick={() => handleItemChange(item.id, 'description', '')} className="text-xs text-blue-500 hover:text-blue-700">
+                                                            + Add Description
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => addSubItem(item.id)} className="text-xs text-blue-500 hover:text-blue-700">
+                                                        + Add Sub Item
+                                                    </button>
+                                                </div>
                                             </td>
-                                            <td className="px-1 py-2 text-right">{item.cgstAmount}</td>
-                                            <td className="px-1 py-2 text-right">{item.sgstAmount}</td>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <td className="px-1 py-2 text-center border-l">
-                                                <EditableNumberField 
-                                                    value={item.igstRate}
-                                                    onChange={(val) => handleItemChange(item.id, 'igstRate', val)}
-                                                    className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
-                                                    decimalPlaces={0}
-                                                />
+                                            {item.subItems.length === 0 ? (
+                                                <>
+                                                    <td className="px-1 py-2">
+                                                        <EditableField value={item.hsn} onChange={(e) => handleItemChange(item.id, 'hsn', e.target.value)} className="w-full" />
+                                                    </td>
+                                                    <td className="px-1 py-2 text-right">
+                                                        <EditableNullableNumberField value={item.qty} onChange={(val) => handleItemChange(item.id, 'qty', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} />
+                                                    </td>
+                                                    <td className="px-1 py-2">
+                                                        <EditableField value={item.unit} onChange={(e) => handleItemChange(item.id, 'unit', e.target.value)} className="w-full" />
+                                                    </td>
+                                                    <td className="px-2 py-2 text-right">
+                                                        <EditableNumberField value={item.price} onChange={(val) => handleItemChange(item.id, 'price', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} />
+                                                    </td>
+                                                    <td className="px-2 py-2 text-right font-medium">{item.itemAmount}</td>
+                                                    {isIntraState ? (
+                                                        <>
+                                                            <td className="px-1 py-2 text-center border-l"><EditableNumberField value={item.cgstRate} onChange={(val) => handleItemChange(item.id, 'csgstRate', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} /></td>
+                                                            <td className="px-1 py-2 text-right">{item.cgstAmount}</td>
+                                                            <td className="px-1 py-2 text-right">{item.sgstAmount}</td>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <td className="px-1 py-2 text-center border-l"><EditableNumberField value={item.igstRate} onChange={(val) => handleItemChange(item.id, 'igstRate', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} /></td>
+                                                            <td className="px-1 py-2 text-right">{item.igstAmount}</td>
+                                                        </>
+                                                    )}
+                                                    <td className="px-2 py-2 text-right font-semibold text-gray-800">{item.totalAmount}</td>
+                                                </>
+                                            ) : (
+                                                <td colSpan={isIntraState ? 8 : 7}></td> // Span empty cells if sub-items exist
+                                            )}
+                                            <td className="p-1 text-center no-print">
+                                                <button onClick={() => removeItem(item.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100"><TrashIcon className="h-5 w-5" /></button>
                                             </td>
-                                            <td className="px-1 py-2 text-right">{item.igstAmount}</td>
-                                        </>
-                                    )}
-                                    <td className="px-2 py-2 text-right font-semibold text-gray-800">{item.totalAmount}</td>
-                                    <td className="p-1 text-center no-print">
-                                        <button onClick={() => removeItem(item.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100">
-                                            <TrashIcon className="h-5 w-5" />
-                                        </button>
-                                    </td>
-                                </tr>
+                                        </tr>
+
+
+                                    {/* RENDER SUB-ITEMS */}
+                                    {item.calculatedSubItems.map((subItem) => (
+                                        <tr key={subItem.id} className="border-b hover:bg-blue-50/50 align-top">
+                                            <td className="px-2 py-2 text-right text-gray-400">↳</td>
+                                            <td className="px-2 py-2">
+                                                <EditableTextarea value={subItem.name} onChange={(e) => handleSubItemChange(item.id, subItem.id, 'name', e.target.value)} placeholder="Sub Item Name" className="font-medium text-gray-700" />
+                                                {subItem.description !== null ? (
+                                                    <EditableTextarea value={subItem.description} onChange={(e) => handleSubItemChange(item.id, subItem.id, 'description', e.target.value)} onBlur={(e) => { if (e.target.value.trim() === '') { handleSubItemChange(item.id, subItem.id, 'description', null); } }} placeholder="(Description)" className="text-xs text-gray-500" />
+                                                ) : (
+                                                    <button onClick={() => handleSubItemChange(item.id, subItem.id, 'description', '')} className="no-print text-xs text-blue-500 hover:text-blue-700 mt-1 pl-1">+ Add Description</button>
+                                                )}
+                                            </td>
+                                            <td className="px-1 py-2"><EditableField value={subItem.hsn} onChange={(e) => handleSubItemChange(item.id, subItem.id, 'hsn', e.target.value)} className="w-full" /></td>
+                                            <td className="px-1 py-2 text-right"><EditableNullableNumberField value={subItem.qty} onChange={(val) => handleSubItemChange(item.id, subItem.id, 'qty', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} /></td>
+                                            <td className="px-1 py-2"><EditableField value={subItem.unit} onChange={(e) => handleSubItemChange(item.id, subItem.id, 'unit', e.target.value)} className="w-full" /></td>
+                                            <td className="px-2 py-2 text-right"><EditableNumberField value={subItem.price} onChange={(val) => handleSubItemChange(item.id, subItem.id, 'price', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} /></td>
+                                            <td className="px-2 py-2 text-right font-medium">{subItem.itemAmount}</td>
+                                            {isIntraState ? (
+                                                <>
+                                                    <td className="px-1 py-2 text-center border-l"><EditableNumberField value={subItem.cgstRate} onChange={(val) => handleSubItemChange(item.id, subItem.id, 'csgstRate', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} /></td>
+                                                    <td className="px-1 py-2 text-right">{subItem.cgstAmount}</td>
+                                                    <td className="px-1 py-2 text-right">{subItem.sgstAmount}</td>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <td className="px-1 py-2 text-center border-l"><EditableNumberField value={subItem.igstRate} onChange={(val) => handleSubItemChange(item.id, subItem.id, 'igstRate', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} /></td>
+                                                    <td className="px-1 py-2 text-right">{subItem.igstAmount}</td>
+                                                </>
+                                            )}
+                                            <td className="px-2 py-2 text-right font-semibold text-gray-800">{subItem.totalAmount}</td>
+                                            <td className="p-1 text-center no-print">
+                                                <button onClick={() => removeSubItem(item.id, subItem.id)} className="text-red-400 hover:text-red-600 p-1 rounded-full hover:bg-red-100"><TrashIcon className="h-4 w-4" /></button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>
@@ -1197,9 +1370,6 @@ const App: React.FC = () => {
                 </button>
                 <button onClick={handlePrint} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                      <PrinterIcon className="h-5 w-5 mr-2"/> Print
-                </button>
-                <button onClick={handleExportPdf} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
-                    <ArrowDownTrayIcon className="h-5 w-5 mr-2"/> Export PDF
                 </button>
             </div>
         </div>
