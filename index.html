@@ -23,6 +23,11 @@
           border: none !important;
         }
       }
+      /* Hide calendar icon on date inputs */
+      input[type="date"]::-webkit-calendar-picker-indicator {
+        display: none;
+        -webkit-appearance: none;
+      }
     </style>
   <script type="importmap">
 {

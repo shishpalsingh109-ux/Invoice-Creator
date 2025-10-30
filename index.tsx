@@ -6,15 +6,24 @@ import { PlusCircleIcon, TrashIcon, ArrowUpTrayIcon, ArrowDownTrayIcon, ArrowUtu
 interface InvoiceItem {
   id: string;
   name: string;
-  detailedDescription: string;
+  subItemName: string | null;
+  detailedDescription: string | null;
   hsn: string;
-  qty: number;
+  qty: number | null;
   unit: string;
   price: number;
   cgstRate: number;
   sgstRate: number;
   igstRate: number;
 }
+
+interface AdjustmentItem {
+  id: string;
+  name: string;
+  amount: number;
+  operation: 'add' | 'subtract';
+}
+
 
 // Type declaration for jspdf from CDN
 declare global {
@@ -149,6 +158,7 @@ const EditableTextarea: React.FC<EditableTextareaProps> = ({ value, onChange, on
             placeholder={placeholder}
             className={`bg-transparent p-1 w-full focus:outline-none focus:bg-blue-50/50 rounded-md transition-colors resize-none overflow-y-hidden ${className}`}
             rows={1}
+            autoFocus
         />
     );
 };
@@ -182,7 +192,7 @@ const EditableNumberField: React.FC<EditableNumberFieldProps> = ({ value, onChan
         const numericValue = parseFloat(newString.replace(/,/g, ''));
         if (!isNaN(numericValue)) {
             onChange(numericValue);
-        } else if (newString === '' || newString === '.') {
+        } else if (newString === '' || newString === '.' || newString === '-') {
             onChange(0);
         }
     };
@@ -211,6 +221,73 @@ const EditableNumberField: React.FC<EditableNumberFieldProps> = ({ value, onChan
     );
 };
 
+interface EditableNullableNumberFieldProps {
+    value: number | null;
+    onChange: (value: number | null) => void;
+    className?: string;
+    decimalPlaces?: number;
+}
+
+const EditableNullableNumberField: React.FC<EditableNullableNumberFieldProps> = ({ value, onChange, className = '', decimalPlaces = 0 }) => {
+    const [localString, setLocalString] = useState(value === null ? '' : String(value));
+    const [isFocused, setIsFocused] = useState(false);
+
+    useEffect(() => {
+        if (!isFocused) {
+            setLocalString(value === null ? '' : formatIndianNumber(value, decimalPlaces));
+        }
+    }, [value, isFocused, decimalPlaces]);
+
+    const handleFocus = () => {
+        setIsFocused(true);
+        setLocalString(value === null ? '' : String(value));
+    };
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newString = e.target.value;
+        setLocalString(newString);
+
+        if (newString.trim() === '') {
+            onChange(null);
+        } else {
+            const numericValue = parseFloat(newString.replace(/,/g, ''));
+            if (!isNaN(numericValue)) {
+                onChange(numericValue);
+            }
+        }
+    };
+
+    const handleBlur = () => {
+        setIsFocused(false);
+        if (localString.trim() === '') {
+            onChange(null);
+        } else {
+            const numericValue = parseFloat(localString.replace(/,/g, ''));
+            let finalValue: number | null = isNaN(numericValue) ? null : numericValue;
+
+            if (finalValue !== null) {
+                if (decimalPlaces === 0) {
+                    finalValue = Math.round(finalValue);
+                }
+                onChange(finalValue);
+            } else {
+                onChange(null);
+            }
+        }
+    };
+
+    return (
+        <input
+            type="text"
+            value={localString}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            onChange={handleChange}
+            className={className}
+        />
+    );
+};
+
 const notificationBgClasses = {
     success: 'bg-green-500',
     info: 'bg-blue-500',
@@ -224,24 +301,30 @@ const App: React.FC = () => {
         invoiceDetails: {
             invoiceNo: '',
             dated: new Date().toISOString().split('T')[0],
-            placeOfSupply: '',
+            placeOfSupply: 'Delhi (07)',
         },
         billedTo: { name: '', address: '', gstin: '' },
         shippedTo: { name: '', address: '', gstin: '' },
         items: [{
             id: Date.now().toString(),
-            name: '', detailedDescription: '', hsn: '', qty: 1, unit: 'Pcs.', price: 0, cgstRate: 9, sgstRate: 9, igstRate: 18
+            name: '', subItemName: null, detailedDescription: null, hsn: '', qty: null, unit: '', price: 0, cgstRate: 9, sgstRate: 9, igstRate: 18
         }] as InvoiceItem[],
-        signature: null as string | null,
+        preTaxItems: [] as AdjustmentItem[],
+        postTaxItems: [] as AdjustmentItem[],
         terms: `1. Goods once sold will not be taken back.\n2. Interest @ 18% p.a. will be charged if the payment is not made with in the stipulated time.\n3. Subject to 'Delhi' Jurisdiction only.`,
+        invoiceTitle: 'Tax Invoice',
+        invoiceSubtitle: 'Original Copy',
     });
 
     const [invoiceDetails, setInvoiceDetails] = useState(getInitialState().invoiceDetails);
     const [billedTo, setBilledTo] = useState(getInitialState().billedTo);
     const [shippedTo, setShippedTo] = useState(getInitialState().shippedTo);
     const [items, setItems] = useState<InvoiceItem[]>(getInitialState().items);
-    const [signature, setSignature] = useState<string | null>(getInitialState().signature);
+    const [preTaxItems, setPreTaxItems] = useState<AdjustmentItem[]>(getInitialState().preTaxItems);
+    const [postTaxItems, setPostTaxItems] = useState<AdjustmentItem[]>(getInitialState().postTaxItems);
     const [terms, setTerms] = useState(getInitialState().terms);
+    const [invoiceTitle, setInvoiceTitle] = useState(getInitialState().invoiceTitle);
+    const [invoiceSubtitle, setInvoiceSubtitle] = useState(getInitialState().invoiceSubtitle);
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
     const [gstinErrors, setGstinErrors] = useState({ billedTo: '', shippedTo: '' });
 
@@ -325,7 +408,10 @@ const App: React.FC = () => {
             setBilledTo(initialState.billedTo);
             setShippedTo(initialState.shippedTo);
             setItems(initialState.items);
-            setSignature(initialState.signature);
+            setPreTaxItems(initialState.preTaxItems);
+            setPostTaxItems(initialState.postTaxItems);
+            setInvoiceTitle(initialState.invoiceTitle);
+            setInvoiceSubtitle(initialState.invoiceSubtitle);
             setGstinErrors({ billedTo: '', shippedTo: '' });
             showNotification('Invoice has been reset.', 'info');
         }
@@ -344,45 +430,21 @@ const App: React.FC = () => {
         }
     };
 
-    const handleItemChange = (id: string, field: keyof InvoiceItem, value: string | number) => {
+    const handleItemChange = (id: string, field: keyof InvoiceItem | 'csgstRate', value: string | number | null) => {
         setItems(prevItems =>
             prevItems.map(item => {
                 if (item.id === id) {
+                    if (field === 'csgstRate') {
+                        const rate = Number(value);
+                        return { ...item, cgstRate: rate, sgstRate: rate };
+                    }
+
                     let processedValue = value;
                     if (field === 'name' && typeof value === 'string') {
                         processedValue = capitalizeFirstLetter(value);
                     }
                     
-                    const updatedItem = { ...item, [field]: processedValue };
-                    if (field === 'cgstRate') {
-                        updatedItem.sgstRate = Number(value);
-                    } else if (field === 'sgstRate') {
-                        updatedItem.cgstRate = Number(value);
-                    }
-                    return updatedItem;
-                }
-                return item;
-            })
-        );
-    };
-
-    const handleItemBlur = (id: string, field: keyof InvoiceItem) => {
-        if (field !== 'detailedDescription') return;
-
-        setItems(prevItems =>
-            prevItems.map(item => {
-                if (item.id === id) {
-                    let value = item.detailedDescription.trim();
-                    if (value) {
-                        if (value.startsWith('(')) {
-                            value = value.substring(1);
-                        }
-                        if (value.endsWith(')')) {
-                            value = value.substring(0, value.length - 1);
-                        }
-                        value = `(${value.trim()})`;
-                    }
-                    return { ...item, detailedDescription: value };
+                    return { ...item, [field as keyof InvoiceItem]: processedValue };
                 }
                 return item;
             })
@@ -393,10 +455,11 @@ const App: React.FC = () => {
         const newItem: InvoiceItem = {
             id: Date.now().toString(),
             name: '',
-            detailedDescription: '',
+            subItemName: null,
+            detailedDescription: null,
             hsn: '',
-            qty: 1,
-            unit: 'Pcs.',
+            qty: null,
+            unit: '',
             price: 0,
             cgstRate: 9,
             sgstRate: 9,
@@ -409,27 +472,29 @@ const App: React.FC = () => {
         setItems(prevItems => prevItems.filter(item => item.id !== id));
     };
 
-    const handleSignatureUpload = (event: ChangeEvent<HTMLInputElement>) => {
-        if (event.target.files && event.target.files[0]) {
-            const file = event.target.files[0];
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setSignature(reader.result as string);
-            };
-            reader.readAsDataURL(file);
-        }
+    const addPreTaxItem = () => setPreTaxItems([...preTaxItems, { id: Date.now().toString(), name: 'Discount', amount: 0, operation: 'subtract' }]);
+    const handlePreTaxItemChange = (id: string, field: keyof Omit<AdjustmentItem, 'id'>, value: string | number) => {
+        setPreTaxItems(preTaxItems.map(item => item.id === id ? { ...item, [field]: value } : item));
     };
+    const removePreTaxItem = (id: string) => setPreTaxItems(preTaxItems.filter(item => item.id !== id));
+
+    const addPostTaxItem = () => setPostTaxItems([...postTaxItems, { id: Date.now().toString(), name: 'Advance Paid', amount: 0, operation: 'subtract' }]);
+    const handlePostTaxItemChange = (id: string, field: keyof Omit<AdjustmentItem, 'id'>, value: string | number) => {
+        setPostTaxItems(postTaxItems.map(item => item.id === id ? { ...item, [field]: value } : item));
+    };
+    const removePostTaxItem = (id: string) => setPostTaxItems(postTaxItems.filter(item => item.id !== id));
 
     // --- CALCULATIONS (MEMOIZED) ---
     const calculations = useMemo(() => {
-        let taxableAmount = 0;
+        let subtotal = 0;
         let totalCgst = 0;
         let totalSgst = 0;
         let totalIgst = 0;
         let totalQty = 0;
 
         const calculatedItemsWithNumbers = items.map(item => {
-            const itemAmount = item.qty * item.price;
+            const itemQty = item.qty ?? 1;
+            const itemAmount = itemQty * item.price;
             let cgstAmount = 0;
             let sgstAmount = 0;
             let igstAmount = 0;
@@ -443,8 +508,8 @@ const App: React.FC = () => {
 
             const totalAmount = itemAmount + cgstAmount + sgstAmount + igstAmount;
 
-            taxableAmount += itemAmount;
-            totalQty += item.qty;
+            subtotal += itemAmount;
+            totalQty += itemQty;
             totalCgst += cgstAmount;
             totalSgst += sgstAmount;
             totalIgst += igstAmount;
@@ -458,30 +523,51 @@ const App: React.FC = () => {
                 totalAmount,
             };
         });
-
-        const totalTax = isIntraState ? totalCgst + totalSgst : totalIgst;
+        
+        const preTaxAdjustmentTotal = preTaxItems.reduce((acc, item) => {
+            const value = Number(item.amount || 0);
+            return item.operation === 'subtract' ? acc - value : acc + value;
+        }, 0);
+        const taxableAmount = subtotal + preTaxAdjustmentTotal;
+        
+        const taxScalingFactor = subtotal !== 0 ? taxableAmount / subtotal : 1;
+        
+        const finalTotalCgst = totalCgst * taxScalingFactor;
+        const finalTotalSgst = totalSgst * taxScalingFactor;
+        const finalTotalIgst = totalIgst * taxScalingFactor;
+        
+        const totalTax = isIntraState ? finalTotalCgst + finalTotalSgst : finalTotalIgst;
         const grandTotal = taxableAmount + totalTax;
+        
+        const postTaxAdjustmentTotal = postTaxItems.reduce((acc, item) => {
+            const value = Number(item.amount || 0);
+            return item.operation === 'subtract' ? acc - value : acc + value;
+        }, 0);
+        const amountDue = grandTotal + postTaxAdjustmentTotal;
 
         return {
             calculatedItems: calculatedItemsWithNumbers.map(item => ({
                 ...item,
                 itemAmount: item.itemAmount,
-                cgstAmount: formatIndianNumber(item.cgstAmount),
-                sgstAmount: formatIndianNumber(item.sgstAmount),
-                igstAmount: formatIndianNumber(item.igstAmount),
-                totalAmount: formatIndianNumber(item.totalAmount),
+                cgstAmount: formatIndianNumber(item.cgstAmount, 0),
+                sgstAmount: formatIndianNumber(item.sgstAmount, 0),
+                igstAmount: formatIndianNumber(item.igstAmount, 0),
+                totalAmount: formatIndianNumber(item.totalAmount, 0),
             })),
             totalQty,
-            taxableAmount: formatIndianNumber(taxableAmount),
-            totalCgst: formatIndianNumber(totalCgst),
-            totalSgst: formatIndianNumber(totalSgst),
-            totalIgst: formatIndianNumber(totalIgst),
-            totalTax: formatIndianNumber(totalTax),
-            grandTotal: formatIndianNumber(grandTotal),
+            subtotal: formatIndianNumber(subtotal, 0),
+            taxableAmount: formatIndianNumber(taxableAmount, 0),
+            totalCgst: formatIndianNumber(finalTotalCgst, 0),
+            totalSgst: formatIndianNumber(finalTotalSgst, 0),
+            totalIgst: formatIndianNumber(finalTotalIgst, 0),
+            totalTax: formatIndianNumber(totalTax, 0),
+            grandTotal: formatIndianNumber(grandTotal, 0),
             grandTotalNumber: grandTotal,
-            grandTotalRounded: Math.round(grandTotal),
+            amountDue: formatIndianNumber(amountDue, 0),
+            amountDueNumber: amountDue,
+            amountDueRounded: Math.round(amountDue),
         };
-    }, [items, isIntraState]);
+    }, [items, isIntraState, preTaxItems, postTaxItems]);
 
     const handlePrint = () => {
         window.print();
@@ -506,9 +592,9 @@ const App: React.FC = () => {
         doc.text('GOODPSYCHE', margin, y);
 
         doc.setFontSize(22).setFont('helvetica', 'bold');
-        doc.text('Tax Invoice', pageWidth - margin, margin, { align: 'right' });
+        doc.text(invoiceTitle, pageWidth - margin, margin, { align: 'right' });
         doc.setFontSize(10).setFont('helvetica', 'normal');
-        doc.text('Original Copy', pageWidth - margin, margin + 5, { align: 'right' });
+        doc.text(invoiceSubtitle, pageWidth - margin, margin + 5, { align: 'right' });
 
         y += 8;
         doc.setFontSize(9).setFont('helvetica', 'normal');
@@ -561,18 +647,25 @@ const App: React.FC = () => {
 
         // --- ITEMS TABLE ---
         const tableHead = isIntraState
-            ? [['S.N.', 'Description', 'HSN', 'Qty', 'Unit', 'Price', 'CGST Rate', 'CGST Amt', 'SGST Rate', 'SGST Amt', 'Amount']]
-            : [['S.N.', 'Description', 'HSN', 'Qty', 'Unit', 'Price', 'IGST Rate', 'IGST Amt', 'Amount']];
+            ? [['S.N.', 'DESCRIPTION OF GOODS/SERVICES', 'HSN', 'Qty', 'Unit', 'Price', 'CGST Rate', 'CGST Amt', 'SGST Rate', 'SGST Amt', 'Amount']]
+            : [['S.N.', 'DESCRIPTION OF GOODS/SERVICES', 'HSN', 'Qty', 'Unit', 'Price', 'IGST Rate', 'IGST Amt', 'Amount']];
 
         const tableBody = calculations.calculatedItems.map((item, index) => {
-            const description = `${item.name}${item.detailedDescription ? `\n${item.detailedDescription}` : ''}`;
+            let description = item.name;
+            if (item.subItemName) {
+                description += `\n${item.subItemName}`;
+            }
+            if (item.detailedDescription) {
+                description += `\n${item.detailedDescription}`;
+            }
+
             return isIntraState
                 ? [
-                    index + 1, description, item.hsn, item.qty, item.unit, formatIndianNumber(item.price, 2),
+                    index + 1, description, item.hsn, item.qty ?? '', item.unit, formatIndianNumber(item.price, 0),
                     item.cgstRate, item.cgstAmount, item.sgstRate, item.sgstAmount, item.totalAmount
                   ]
                 : [
-                    index + 1, description, item.hsn, item.qty, item.unit, formatIndianNumber(item.price, 2),
+                    index + 1, description, item.hsn, item.qty ?? '', item.unit, formatIndianNumber(item.price, 0),
                     item.igstRate, item.igstAmount, item.totalAmount
                   ];
         });
@@ -595,38 +688,90 @@ const App: React.FC = () => {
         });
 
         y = (doc as any).autoTable.previous.finalY + 10;
+        const startY = y;
+        let leftFinalY = startY;
+        let rightFinalY = startY;
 
-        // --- TOTALS ---
-        const totalsX = pageWidth / 1.7;
+        // --- TOTALS (RIGHT) ---
+        const totalsX = pageWidth * 0.6;
         doc.setFontSize(10).setFont('helvetica', 'normal');
-        doc.text('Taxable Amount:', totalsX, y);
-        doc.text(`₹ ${calculations.taxableAmount}`, pageWidth - margin, y, { align: 'right' });
-        y += 7;
+        doc.text('Subtotal:', totalsX, rightFinalY);
+        doc.text(`₹ ${calculations.subtotal}`, pageWidth - margin, rightFinalY, { align: 'right' });
+        rightFinalY += 7;
+
+        preTaxItems.forEach(item => {
+            doc.text(`${item.name}:`, totalsX, rightFinalY);
+            const amountText = `${item.operation === 'subtract' ? '-' : ''} ₹ ${formatIndianNumber(item.amount, 0)}`;
+            doc.text(amountText, pageWidth - margin, rightFinalY, { align: 'right' });
+            rightFinalY += 7;
+        });
+
+        doc.setFont('helvetica', 'bold');
+        doc.text('Taxable Amount:', totalsX, rightFinalY);
+        doc.text(`₹ ${calculations.taxableAmount}`, pageWidth - margin, rightFinalY, { align: 'right' });
+        rightFinalY += 7;
+        doc.setFont('helvetica', 'normal');
+
         if (isIntraState) {
-            doc.text('CGST Amount:', totalsX, y);
-            doc.text(`₹ ${calculations.totalCgst}`, pageWidth - margin, y, { align: 'right' });
-            y += 7;
-            doc.text('SGST Amount:', totalsX, y);
-            doc.text(`₹ ${calculations.totalSgst}`, pageWidth - margin, y, { align: 'right' });
-            y += 7;
+            doc.text('CGST Amount:', totalsX, rightFinalY);
+            doc.text(`₹ ${calculations.totalCgst}`, pageWidth - margin, rightFinalY, { align: 'right' });
+            rightFinalY += 7;
+            doc.text('SGST Amount:', totalsX, rightFinalY);
+            doc.text(`₹ ${calculations.totalSgst}`, pageWidth - margin, rightFinalY, { align: 'right' });
+            rightFinalY += 7;
         } else {
-            doc.text('IGST Amount:', totalsX, y);
-            doc.text(`₹ ${calculations.totalIgst}`, pageWidth - margin, y, { align: 'right' });
-            y += 7;
+            doc.text('IGST Amount:', totalsX, rightFinalY);
+            doc.text(`₹ ${calculations.totalIgst}`, pageWidth - margin, rightFinalY, { align: 'right' });
+            rightFinalY += 7;
         }
-        doc.setLineWidth(0.2).line(totalsX - 5, y - 2, pageWidth - margin, y - 2);
+
+        doc.setLineWidth(0.2).line(totalsX - 5, rightFinalY - 2, pageWidth - margin, rightFinalY - 2);
         doc.setFontSize(11).setFont('helvetica', 'bold');
-        doc.text('Grand Total:', totalsX, y);
-        doc.text(`₹ ${calculations.grandTotal}`, pageWidth - margin, y, { align: 'right' });
-        y += 10;
-        
-        // --- AMOUNT IN WORDS ---
+        doc.text('Grand Total:', totalsX, rightFinalY);
+        doc.text(`₹ ${calculations.grandTotal}`, pageWidth - margin, rightFinalY, { align: 'right' });
+        rightFinalY += 7;
         doc.setFontSize(10).setFont('helvetica', 'normal');
-        const amountInWords = `Rupees ${numberToWords(calculations.grandTotalRounded)}`;
-        const wrappedAmount = doc.splitTextToSize(amountInWords, pageWidth - margin * 2);
-        doc.text('Amount in Words:', margin, y);
-        doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, y + 5);
-        y += wrappedAmount.length * 5 + 10;
+        
+        postTaxItems.forEach(item => {
+            doc.text(`${item.name}:`, totalsX, rightFinalY);
+            const amountText = `${item.operation === 'subtract' ? '-' : ''} ₹ ${formatIndianNumber(item.amount, 0)}`;
+            doc.text(amountText, pageWidth - margin, rightFinalY, { align: 'right' });
+            rightFinalY += 7;
+        });
+
+        doc.setFontSize(12).setFont('helvetica', 'bold');
+        doc.text('Amount Due:', totalsX, rightFinalY);
+        doc.text(`₹ ${calculations.amountDue}`, pageWidth - margin, rightFinalY, { align: 'right' });
+        
+        // --- BANK, TERMS & AMOUNT IN WORDS (LEFT) ---
+        const leftBlockPdfWidth = pageWidth * 0.58 - margin;
+        
+        // Bank Details
+        doc.setFontSize(9).setFont('helvetica', 'bold').text('Bank Details', margin, leftFinalY);
+        leftFinalY += 5;
+        doc.setFontSize(8).setFont('helvetica', 'normal');
+        const bankDetails = `Account Name: GoodPhysche\nAccount No: 083105501016\nIFSC : ICICI0000831\nBANK: ICICI Bank\nBranch: Laxmi Nagar\nUPI ID: goodpsyche.ibz@icici`;
+        const bankDetailsLines = doc.splitTextToSize(bankDetails, leftBlockPdfWidth);
+        doc.text(bankDetailsLines, margin, leftFinalY);
+        leftFinalY += bankDetailsLines.length * 4 + 5;
+
+        // Terms & Conditions
+        doc.setFontSize(9).setFont('helvetica', 'bold').text('Terms & Conditions', margin, leftFinalY);
+        leftFinalY += 5;
+        doc.setFontSize(8).setFont('helvetica', 'normal');
+        const termsLines = doc.splitTextToSize(terms, leftBlockPdfWidth);
+        doc.text(termsLines, margin, leftFinalY);
+        leftFinalY += termsLines.length * 4 + 5;
+        
+        // Amount in Words
+        doc.setFontSize(10).setFont('helvetica', 'normal');
+        const amountInWords = `Rupees ${numberToWords(calculations.amountDueRounded)}`;
+        const wrappedAmount = doc.splitTextToSize(amountInWords, leftBlockPdfWidth);
+        doc.text('Amount in Words:', margin, leftFinalY);
+        doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, leftFinalY + 5);
+        leftFinalY += wrappedAmount.length * 5;
+        
+        y = Math.max(leftFinalY, rightFinalY) + 15;
         
         // --- FOOTER ---
         if (y > pageHeight - 50) {
@@ -637,21 +782,9 @@ const App: React.FC = () => {
         doc.setLineWidth(0.5).line(margin, y, pageWidth - margin, y);
         y += 7;
         
-        const footerLeftX = margin;
         const footerRightX = pageWidth - margin;
         
-        doc.setFontSize(9).setFont('helvetica', 'bold').text('Terms & Conditions', footerLeftX, y);
-        y += 5;
-        doc.setFontSize(8).setFont('helvetica', 'normal');
-        const termsLines = doc.splitTextToSize(terms, (pageWidth / 2) - 20);
-        doc.text(termsLines, footerLeftX, y);
-
         doc.setFont('helvetica', 'bold').setFontSize(10).text('For GOODPSYCHE', footerRightX, y + 5, { align: 'right' });
-        
-        if (signature) {
-            const imgType = signature.substring(signature.indexOf('/') + 1, signature.indexOf(';')).toUpperCase();
-            doc.addImage(signature, imgType, footerRightX - 50, y + 10, 50, 20);
-        }
         
         y += 40;
         doc.setLineWidth(0.2).line(footerRightX - 60, y, footerRightX, y);
@@ -688,14 +821,22 @@ const App: React.FC = () => {
                         </p>
                     </div>
                     <div className="text-right">
-                        <h2 className="text-3xl font-bold text-gray-800 uppercase">Tax Invoice</h2>
-                        <p className="text-sm text-gray-500">Original Copy</p>
+                        <EditableField
+                            value={invoiceTitle}
+                            onChange={(e) => setInvoiceTitle(e.target.value)}
+                            className="text-3xl font-bold text-gray-800 uppercase text-right w-full"
+                        />
+                        <EditableField
+                            value={invoiceSubtitle}
+                            onChange={(e) => setInvoiceSubtitle(e.target.value)}
+                            className="text-sm text-gray-500 text-right w-full"
+                        />
                     </div>
                 </header>
 
                 {/* Invoice Details & Party Details */}
-                <section className="grid md:grid-cols-3 gap-6 mt-6">
-                    <div className="md:col-span-2 grid grid-cols-2 gap-6">
+                <section className="grid md:grid-cols-3 gap-6 mt-6 items-start">
+                    <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
                          <div>
                             <strong className="text-gray-600">Billed to:</strong>
                             <EditableTextarea value={billedTo.name} onChange={(e) => setBilledTo({ ...billedTo, name: capitalizeWords(e.target.value) })} placeholder="Party Name" className="font-bold text-gray-800" />
@@ -733,280 +874,337 @@ const App: React.FC = () => {
                             </div>
                          </div>
                     </div>
-                    <div className="text-sm text-gray-700 space-y-2">
-                        <div className="flex justify-between">
-                            <span className="font-semibold">Invoice No.:</span>
-                            <EditableField value={invoiceDetails.invoiceNo} onChange={(e) => setInvoiceDetails({...invoiceDetails, invoiceNo: e.target.value})} className="text-right w-full" />
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="font-semibold">Dated:</span>
-                             <input type="date" value={invoiceDetails.dated} onChange={(e) => setInvoiceDetails({...invoiceDetails, dated: e.target.value})} className="bg-transparent text-right w-full focus:outline-none focus:bg-blue-50/50 rounded-md p-1"/>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="font-semibold">Place of Supply:</span>
-                             <EditableField value={invoiceDetails.placeOfSupply} onChange={(e) => setInvoiceDetails({...invoiceDetails, placeOfSupply: e.target.value})} className="text-right w-full" />
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="font-semibold">Reverse Charge:</span>
-                            <span>N</span>
-                        </div>
+                    <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm text-gray-700 items-center">
+                        <span className="font-semibold whitespace-nowrap">Invoice No.:</span>
+                        <EditableField value={invoiceDetails.invoiceNo} onChange={(e) => setInvoiceDetails({...invoiceDetails, invoiceNo: e.target.value})} className="text-right w-full" />
+                        
+                        <span className="font-semibold whitespace-nowrap">Place of Supply:</span>
+                        <EditableField value={invoiceDetails.placeOfSupply} onChange={(e) => setInvoiceDetails({...invoiceDetails, placeOfSupply: e.target.value})} className="text-right w-full" />
+
+                        <span className="font-semibold whitespace-nowrap">Dated:</span>
+                        <input type="date" value={invoiceDetails.dated} onChange={(e) => setInvoiceDetails({...invoiceDetails, dated: e.target.value})} className="bg-transparent text-right w-full focus:outline-none focus:bg-blue-50/50 rounded-md p-1"/>
+                        
+                        <span className="font-semibold whitespace-nowrap">Reverse Charge:</span>
+                        <span className="text-right w-full pr-1">N</span>
                     </div>
                 </section>
 
                 {/* Items Table */}
                 <section className="mt-8">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left text-gray-500">
-                            <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-y">
-                                <tr>
-                                    <th scope="col" className="px-1 py-3 w-10">S.N.</th>
-                                    <th scope="col" className="px-1 py-3 min-w-[200px]">Description of Goods</th>
-                                    <th scope="col" className="px-1 py-3 w-20">HSN/SAC</th>
-                                    <th scope="col" className="px-1 py-3 text-right">Qty</th>
-                                    <th scope="col" className="px-1 py-3">Unit</th>
-                                    <th scope="col" className="px-1 py-3 text-right">Price</th>
+                    <table className="w-full text-sm text-left text-gray-500 table-fixed">
+                        <thead className="text-xs text-gray-700 uppercase bg-gray-100">
+                            <tr>
+                                <th className="px-2 py-3 w-[4%] text-center">S.N.</th>
+                                <th className="px-2 py-3 w-[32%]">DESCRIPTION OF GOODS/SERVICES</th>
+                                <th className="px-1 py-3 w-[8%]">HSN/SAC</th>
+                                <th className="px-1 py-3 w-[5%] text-right">Qty</th>
+                                <th className="px-1 py-3 w-[6%]">Unit</th>
+                                <th className="px-2 py-3 w-[8%] text-right">Price</th>
+                                <th className="px-2 py-3 w-[8%] text-right">Amount</th>
+                                {isIntraState ? (
+                                    <>
+                                        <th className="px-1 py-3 w-[6%] text-center">Tax %</th>
+                                        <th className="px-1 py-3 w-[7%] text-right">CGST Amt</th>
+                                        <th className="px-1 py-3 w-[7%] text-right">SGST Amt</th>
+                                    </>
+                                ) : (
+                                    <>
+                                        <th className="px-1 py-3 w-[8%] text-center">IGST %</th>
+                                        <th className="px-1 py-3 w-[9%] text-right">IGST Amt</th>
+                                    </>
+                                )}
+                                <th className="px-2 py-3 w-[9%] text-right">Total</th>
+                                <th className="p-1 w-[3%] no-print"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {calculations.calculatedItems.map((item, index) => (
+                                <tr key={item.id} className="border-b hover:bg-gray-50 align-middle">
+                                    <td className="px-2 py-2 text-center">{index + 1}</td>
+                                    <td className="px-2 py-2">
+                                        <EditableTextarea
+                                            value={item.name}
+                                            onChange={(e) => handleItemChange(item.id, 'name', e.target.value)}
+                                            placeholder="Item Name"
+                                            className="font-semibold text-gray-800"
+                                        />
+                                        <div className="space-y-1">
+                                            {item.subItemName !== null ? (
+                                                <EditableTextarea
+                                                    value={item.subItemName}
+                                                    onChange={(e) => handleItemChange(item.id, 'subItemName', e.target.value)}
+                                                    onBlur={(e) => {
+                                                        if (e.target.value.trim() === '') {
+                                                            handleItemChange(item.id, 'subItemName', null);
+                                                        }
+                                                    }}
+                                                    placeholder="(Sub Item)"
+                                                    className="text-sm text-gray-600"
+                                                />
+                                            ) : (
+                                                <button onClick={() => handleItemChange(item.id, 'subItemName', '')} className="no-print text-xs text-blue-500 hover:text-blue-700 mt-1 pl-1">+ Add Sub Item</button>
+                                            )}
+                                            {item.detailedDescription !== null ? (
+                                                <EditableTextarea
+                                                    value={item.detailedDescription}
+                                                    onChange={(e) => handleItemChange(item.id, 'detailedDescription', e.target.value)}
+                                                    onBlur={(e) => {
+                                                        const value = e.target.value.trim();
+                                                        if (value === '') {
+                                                            handleItemChange(item.id, 'detailedDescription', null);
+                                                        } else {
+                                                            const formattedValue = `(${value.replace(/^\(|\)$/g, '')})`;
+                                                            handleItemChange(item.id, 'detailedDescription', formattedValue);
+                                                        }
+                                                    }}
+                                                    placeholder="(Detailed description)"
+                                                    className="text-xs text-gray-500"
+                                                />
+                                            ) : (
+                                                <button onClick={() => handleItemChange(item.id, 'detailedDescription', '')} className="no-print text-xs text-blue-500 hover:text-blue-700 mt-1 pl-1">+ Add Description</button>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="px-1 py-2">
+                                        <EditableField
+                                            value={item.hsn}
+                                            onChange={(e) => handleItemChange(item.id, 'hsn', e.target.value)}
+                                            className="w-full"
+                                        />
+                                    </td>
+                                    <td className="px-1 py-2 text-right">
+                                       <EditableNullableNumberField 
+                                            value={item.qty}
+                                            onChange={(val) => handleItemChange(item.id, 'qty', val)}
+                                            className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
+                                            decimalPlaces={0}
+                                        />
+                                    </td>
+                                    <td className="px-1 py-2">
+                                        <EditableField
+                                            value={item.unit}
+                                            onChange={(e) => handleItemChange(item.id, 'unit', e.target.value)}
+                                            className="w-full"
+                                        />
+                                    </td>
+                                    <td className="px-2 py-2 text-right">
+                                        <EditableNumberField 
+                                            value={item.price}
+                                            onChange={(val) => handleItemChange(item.id, 'price', val)}
+                                            className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
+                                            decimalPlaces={0}
+                                        />
+                                    </td>
+                                    <td className="px-2 py-2 text-right font-medium">{formatIndianNumber(item.itemAmount, 0)}</td>
                                     {isIntraState ? (
                                         <>
-                                            <th scope="col" className="px-1 py-3 text-center" colSpan={2}>CGST</th>
-                                            <th scope="col" className="px-1 py-3 text-center" colSpan={2}>SGST</th>
+                                            <td className="px-1 py-2 text-center border-l">
+                                                <EditableNumberField 
+                                                    value={item.cgstRate}
+                                                    onChange={(val) => handleItemChange(item.id, 'csgstRate', val)}
+                                                    className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
+                                                    decimalPlaces={0}
+                                                />
+                                            </td>
+                                            <td className="px-1 py-2 text-right">{item.cgstAmount}</td>
+                                            <td className="px-1 py-2 text-right">{item.sgstAmount}</td>
                                         </>
                                     ) : (
-                                        <th scope="col" className="px-1 py-3 text-center" colSpan={4}>IGST</th>
+                                        <>
+                                            <td className="px-1 py-2 text-center border-l">
+                                                <EditableNumberField 
+                                                    value={item.igstRate}
+                                                    onChange={(val) => handleItemChange(item.id, 'igstRate', val)}
+                                                    className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
+                                                    decimalPlaces={0}
+                                                />
+                                            </td>
+                                            <td className="px-1 py-2 text-right">{item.igstAmount}</td>
+                                        </>
                                     )}
-                                    <th scope="col" className="px-1 py-3 text-right">Amount (₹)</th>
-                                    <th scope="col" className="px-1 py-3 no-print"></th>
+                                    <td className="px-2 py-2 text-right font-semibold text-gray-800">{item.totalAmount}</td>
+                                    <td className="p-1 text-center no-print">
+                                        <button onClick={() => removeItem(item.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100">
+                                            <TrashIcon className="h-5 w-5" />
+                                        </button>
+                                    </td>
                                 </tr>
-                                 <tr className="text-xs text-gray-700 bg-gray-100">
-                                    <th className="px-1 py-1"></th>
-                                    <th className="px-1 py-1"></th>
-                                    <th className="px-1 py-1"></th>
-                                    <th className="px-1 py-1"></th>
-                                    <th className="px-1 py-1"></th>
-                                    <th className="px-1 py-1"></th>
-                                    {isIntraState ? (
-                                        <>
-                                            <th className="px-1 py-1 text-center border-l">Rate (%)</th>
-                                            <th className="px-1 py-1 text-right border-l">Amount</th>
-                                            <th className="px-1 py-1 text-center border-l">Rate (%)</th>
-                                            <th className="px-1 py-1 text-right border-l">Amount</th>
-                                        </>
-                                     ) : (
-                                        <>
-                                            <th className="px-1 py-1 text-center border-l" colSpan={2}>Rate (%)</th>
-                                            <th className="px-1 py-1 text-right border-l" colSpan={2}>Amount</th>
-                                        </>
-                                     )}
-                                    <th className="px-1 py-1"></th>
-                                    <th className="px-1 py-1 no-print"></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {calculations.calculatedItems.map((item, index) => (
-                                    <tr key={item.id} className="border-b hover:bg-gray-50">
-                                        <td className="px-1 py-2">{index + 1}</td>
-                                        <td className="px-1 py-2">
-                                            <EditableTextarea 
-                                                value={item.name} 
-                                                onChange={(e) => handleItemChange(item.id, 'name', e.target.value)} 
-                                                placeholder="Item Name"
-                                                className="font-medium"
-                                            />
-                                            <EditableTextarea 
-                                                value={item.detailedDescription} 
-                                                onChange={(e) => handleItemChange(item.id, 'detailedDescription', e.target.value)} 
-                                                onBlur={() => handleItemBlur(item.id, 'detailedDescription')}
-                                                placeholder="(Detailed description)"
-                                                className="text-xs italic w-full text-gray-500"
-                                            />
-                                        </td>
-                                        <td className="px-1 py-2">
-                                            <EditableField value={item.hsn} onChange={(e) => handleItemChange(item.id, 'hsn', e.target.value)} className="w-full" />
-                                        </td>
-                                        <td className="px-1 py-2 text-right">
-                                            <EditableNumberField value={item.qty} onChange={(newValue) => handleItemChange(item.id, 'qty', newValue)} className="w-20 text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} />
-                                        </td>
-                                        <td className="px-1 py-2">
-                                            <EditableField value={item.unit} onChange={(e) => handleItemChange(item.id, 'unit', e.target.value)} className="w-full" />
-                                        </td>
-                                        <td className="px-1 py-2 text-right">
-                                            <EditableNumberField value={item.price} onChange={(newValue) => handleItemChange(item.id, 'price', newValue)} className="w-24 text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={2} />
-                                        </td>
-                                        
-                                        {isIntraState ? (
-                                            <>
-                                                <td className="px-1 py-2 border-l">
-                                                    <input type="number" value={item.cgstRate} onChange={(e) => handleItemChange(item.id, 'cgstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />
-                                                </td>
-                                                <td className="px-1 py-2 text-right border-l tabular-nums">{item.cgstAmount}</td>
-                                                <td className="px-1 py-2 border-l">
-                                                    <input type="number" value={item.sgstRate} onChange={(e) => handleItemChange(item.id, 'sgstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />
-                                                </td>
-                                                <td className="px-1 py-2 text-right border-l tabular-nums">{item.sgstAmount}</td>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <td className="px-1 py-2 border-l text-center" colSpan={2}>
-                                                    <input type="number" value={item.igstRate} onChange={(e) => handleItemChange(item.id, 'igstRate', parseFloat(e.target.value) || 0)} className="w-14 text-center bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" />
-                                                </td>
-                                                <td className="px-1 py-2 text-right border-l tabular-nums" colSpan={2}>{item.igstAmount}</td>
-                                            </>
-                                        )}
-                                        
-                                        <td className="px-1 py-2 text-right font-semibold tabular-nums">{item.totalAmount}</td>
-                                        <td className="px-1 py-2 no-print">
-                                            <button onClick={() => removeItem(item.id)} className="text-red-500 hover:text-red-700">
-                                                <TrashIcon className="w-4 h-4" />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                            ))}
+                        </tbody>
+                    </table>
+                    <div className="flex justify-start mt-4 no-print">
+                        <button onClick={addItem} className="flex items-center text-sm font-semibold text-blue-600 hover:text-blue-800">
+                            <PlusCircleIcon className="h-5 w-5 mr-1" />
+                            Add Item
+                        </button>
                     </div>
-                    <button onClick={addItem} className="no-print mt-4 flex items-center text-sm font-medium text-blue-600 hover:text-blue-800">
-                        <PlusCircleIcon className="w-5 h-5 mr-1"/>
-                        Add Item
-                    </button>
+                </section>
+
+                {/* Totals, Bank, Terms & Amount in Words */}
+                <section className="mt-6 flex flex-col md:flex-row justify-between gap-8">
+                    <div className="w-full md:w-7/12 flex flex-col gap-4">
+                        <div>
+                            <h4 className="font-semibold text-gray-700 mb-2">Bank Details</h4>
+                            <div className="text-xs text-gray-600 p-2 border border-gray-200 rounded-md space-y-1">
+                                <p><strong className="text-gray-700">Account Name:</strong> GoodPhysche</p>
+                                <p><strong className="text-gray-700">Account No:</strong> 083105501016</p>
+                                <p><strong className="text-gray-700">IFSC:</strong> ICICI0000831</p>
+                                <p><strong className="text-gray-700">BANK:</strong> ICICI Bank</p>
+                                <p><strong className="text-gray-700">Branch:</strong> Laxmi Nagar</p>
+                                <p><strong className="text-gray-700">UPI ID:</strong> goodpsyche.ibz@icici</p>
+                            </div>
+                        </div>
+                        <div>
+                            <h4 className="font-semibold text-gray-700 mb-2">Terms & Conditions</h4>
+                            <EditableTextarea
+                                value={terms}
+                                onChange={(e) => setTerms(e.target.value)}
+                                className="text-xs text-gray-500 w-full p-2 border border-gray-200 rounded-md"
+                            />
+                        </div>
+                        <div>
+                            <p className="text-sm text-gray-600">
+                                Amount in Words: <span className="font-semibold text-gray-800">{`Rupees ${numberToWords(calculations.amountDueRounded)}`}</span>
+                            </p>
+                        </div>
+                    </div>
+                    <div className="w-full md:w-5/12 text-gray-700 text-sm">
+                        <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+                            {/* Subtotal */}
+                            <span className="py-2 border-b">Subtotal</span>
+                            <span className="font-semibold py-2 border-b text-right">₹ {calculations.subtotal}</span>
+                            
+                            {/* Pre-tax items */}
+                            {preTaxItems.map(item => (
+                                 <React.Fragment key={item.id}>
+                                     <div className="flex items-center py-1">
+                                         <div className="mr-2 flex rounded-md shadow-sm no-print">
+                                            <button
+                                                onClick={() => handlePreTaxItemChange(item.id, 'operation', 'add')}
+                                                title="Add to total"
+                                                className={`px-2 py-0.5 rounded-l-md border border-gray-300 text-sm font-bold focus:outline-none transition-colors ${
+                                                    item.operation === 'add' ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                            >+</button>
+                                            <button
+                                                onClick={() => handlePreTaxItemChange(item.id, 'operation', 'subtract')}
+                                                title="Subtract from total"
+                                                className={`-ml-px px-2 py-0.5 rounded-r-md border border-gray-300 text-sm font-bold focus:outline-none transition-colors ${
+                                                    item.operation === 'subtract' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                            >-</button>
+                                        </div>
+                                         <EditableField value={item.name} onChange={e => handlePreTaxItemChange(item.id, 'name', e.target.value)} className="w-24" />
+                                         <button onClick={() => removePreTaxItem(item.id)} className="no-print text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 ml-1">
+                                            <TrashIcon className="h-4 w-4" />
+                                        </button>
+                                     </div>
+                                     <EditableNumberField value={item.amount} onChange={val => handlePreTaxItemChange(item.id, 'amount', Math.abs(val))} className="w-28 text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0}/>
+                                 </React.Fragment>
+                            ))}
+                            <div className="col-span-2 text-left mt-1 no-print">
+                                 <button onClick={addPreTaxItem} className="flex items-center text-xs font-semibold text-blue-600 hover:text-blue-800">
+                                    <PlusCircleIcon className="h-4 w-4 mr-1" />
+                                    Add Pre-Tax Item
+                                </button>
+                            </div>
+                            
+                            {/* Taxable Amount */}
+                            <span className="font-bold py-2 border-t border-b mt-2">Taxable Amount</span>
+                            <span className="font-bold py-2 border-t border-b mt-2 text-right">₹ {calculations.taxableAmount}</span>
+                            
+                             {isIntraState ? (
+                                <>
+                                    <span className="py-2 border-b">Total CGST</span>
+                                    <span className="font-semibold py-2 border-b text-right">₹ {calculations.totalCgst}</span>
+                                    <span className="py-2 border-b">Total SGST</span>
+                                    <span className="font-semibold py-2 border-b text-right">₹ {calculations.totalSgst}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span className="py-2 border-b">Total IGST</span>
+                                    <span className="font-semibold py-2 border-b text-right">₹ {calculations.totalIgst}</span>
+                                </>
+                            )}
+                            
+                            {/* Grand Total */}
+                            <div className="col-span-2 flex justify-between py-3 my-2 bg-gray-100 px-4 -mx-2 rounded-md font-bold text-gray-800">
+                                <span>Grand Total</span>
+                                <span>₹ {calculations.grandTotal}</span>
+                            </div>
+                            
+                            {/* Post-tax items */}
+                            {postTaxItems.map(item => (
+                                 <React.Fragment key={item.id}>
+                                     <div className="flex items-center py-1">
+                                         <div className="mr-2 flex rounded-md shadow-sm no-print">
+                                            <button
+                                                onClick={() => handlePostTaxItemChange(item.id, 'operation', 'add')}
+                                                title="Add to total"
+                                                className={`px-2 py-0.5 rounded-l-md border border-gray-300 text-sm font-bold focus:outline-none transition-colors ${
+                                                    item.operation === 'add' ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                            >+</button>
+                                            <button
+                                                onClick={() => handlePostTaxItemChange(item.id, 'operation', 'subtract')}
+                                                title="Subtract from total"
+                                                className={`-ml-px px-2 py-0.5 rounded-r-md border border-gray-300 text-sm font-bold focus:outline-none transition-colors ${
+                                                    item.operation === 'subtract' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                            >-</button>
+                                        </div>
+                                         <EditableField value={item.name} onChange={e => handlePostTaxItemChange(item.id, 'name', e.target.value)} className="w-24" />
+                                         <button onClick={() => removePostTaxItem(item.id)} className="no-print text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 ml-1">
+                                            <TrashIcon className="h-4 w-4" />
+                                        </button>
+                                     </div>
+                                     <EditableNumberField value={item.amount} onChange={val => handlePostTaxItemChange(item.id, 'amount', Math.abs(val))} className="w-28 text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0}/>
+                                 </React.Fragment>
+                            ))}
+                            <div className="col-span-2 text-left mt-1 no-print">
+                                 <button onClick={addPostTaxItem} className="flex items-center text-xs font-semibold text-blue-600 hover:text-blue-800">
+                                    <PlusCircleIcon className="h-4 w-4 mr-1" />
+                                    Add Post-Tax Item
+                                </button>
+                            </div>
+
+                            {/* Amount Due */}
+                            <div className="col-span-2 flex justify-between py-3 mt-2 bg-blue-100 px-4 -mx-2 rounded-md font-bold text-lg text-blue-800">
+                                <span>Amount Due</span>
+                                <span>₹ {calculations.amountDue}</span>
+                            </div>
+                        </div>
+                    </div>
                 </section>
                 
-                {/* Grand Total */}
-                <section className="mt-4 flex justify-end">
-                    <div className="w-full md:w-1/2 lg:w-1/3">
-                        <div className="flex justify-between items-center py-2 border-t">
-                            <span className="font-semibold text-gray-600">Grand Total Qty:</span>
-                            <span className="font-bold text-gray-800 tabular-nums">{formatIndianNumber(calculations.totalQty, 0)} Pcs.</span>
-                        </div>
-                        <div className="flex justify-between items-center py-2 border-t-2 font-bold text-lg text-gray-900 bg-gray-50 -mx-4 px-4">
-                            <span>Grand Total:</span>
-                            <span className="tabular-nums">₹ {calculations.grandTotal}</span>
-                        </div>
-                    </div>
-                </section>
-
-
-                {/* Totals Summary */}
-                <section className="mt-6 p-4 bg-gray-50 rounded-lg">
-                    <div className={`grid grid-cols-2 ${isIntraState ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4 text-center text-sm`}>
-                        <div>
-                            <p className="text-gray-500 uppercase text-xs font-bold">Tax Rate</p>
-                            <p className="text-gray-800 font-medium mt-1">18%</p>
-                        </div>
-                        <div>
-                            <p className="text-gray-500 uppercase text-xs font-bold">Taxable Amt.</p>
-                            <p className="text-gray-800 font-medium mt-1 tabular-nums">₹ {calculations.taxableAmount}</p>
-                        </div>
-                        {isIntraState ? (
-                            <>
-                                <div>
-                                    <p className="text-gray-500 uppercase text-xs font-bold">CGST Amt.</p>
-                                    <p className="text-gray-800 font-medium mt-1 tabular-nums">₹ {calculations.totalCgst}</p>
-                                </div>
-                                <div>
-                                    <p className="text-gray-500 uppercase text-xs font-bold">SGST Amt.</p>
-                                    <p className="text-gray-800 font-medium mt-1 tabular-nums">₹ {calculations.totalSgst}</p>
-                                </div>
-                            </>
-                        ) : (
-                            <div>
-                                <p className="text-gray-500 uppercase text-xs font-bold">IGST Amt.</p>
-                                <p className="text-gray-800 font-medium mt-1 tabular-nums">₹ {calculations.totalIgst}</p>
-                            </div>
-                        )}
-                        <div className="col-span-2 md:col-span-1">
-                            <p className="text-gray-500 uppercase text-xs font-bold">Total Tax</p>
-                            <p className="text-gray-800 font-medium mt-1 tabular-nums">₹ {calculations.totalTax}</p>
-                        </div>
-                    </div>
-                </section>
-
-                {/* Amount in Words */}
-                <section className="mt-6">
-                    <p className="text-sm text-gray-800">
-                        <span className="font-semibold">Amount in Words:</span> Rupees {numberToWords(calculations.grandTotalRounded)}
-                    </p>
-                </section>
-
                 {/* Footer */}
-                <footer className="mt-8 pt-6 border-t-2 border-gray-200 grid md:grid-cols-2 gap-8 text-sm">
-                     <div>
-                        <h4 className="font-semibold text-gray-700 mb-2">Terms & Conditions</h4>
-                        <div className="text-xs text-gray-500 whitespace-pre-wrap">{terms}</div>
-                        <p className="text-xs text-gray-500 mt-2">E.& O.E.</p>
-                     </div>
-                     <div className="md:text-right flex flex-col justify-between items-end">
-                        <div className="text-center">
-                            <p className="font-bold text-gray-800">For GOODPSYCHE</p>
-                            
-                            <div className="mt-12 h-20 w-48 relative no-print">
-                                {signature ? (
-                                    <img src={signature} alt="Signature" className="h-full w-full object-contain" />
-                                ) : (
-                                    <label className="cursor-pointer w-full h-full flex flex-col items-center justify-center border-2 border-dashed rounded-lg text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors">
-                                        <ArrowUpTrayIcon className="w-6 h-6 mb-1"/>
-                                        <span>Attach Signature</span>
-                                        <input type="file" className="hidden" accept="image/*" onChange={handleSignatureUpload} />
-                                    </label>
-                                )}
-                            </div>
-                            <div className="mt-2 pt-2 border-t border-gray-400 w-48">
-                                <p className="font-semibold text-gray-700">Authorised Signatory</p>
-                            </div>
-                        </div>
-                     </div>
+                <footer className="mt-10 pt-6 border-t-2 border-gray-200 flex justify-end">
+                    <div className="text-center w-full max-w-xs">
+                         <h4 className="font-semibold text-gray-700">For GOODPSYCHE</h4>
+                         <div className="h-24 mt-4">
+                            {/* Empty space for signature */}
+                         </div>
+                         <div className="border-t-2 mt-2 pt-1">
+                             <p className="font-semibold text-gray-800">Authorised Signatory</p>
+                         </div>
+                    </div>
                 </footer>
             </div>
-
-            {/* Action Buttons */}
-            <div className="no-print fixed bottom-0 right-0 p-6 flex flex-col items-end space-y-4 z-50">
-                 <div className="relative group flex justify-center">
-                    <button 
-                        onClick={handleExportPdf} 
-                        className="bg-green-600 text-white rounded-full p-4 shadow-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-transform hover:scale-105"
-                        aria-label="Download PDF"
-                    >
-                        <ArrowDownTrayIcon className="h-6 w-6" />
-                    </button>
-                    <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 w-auto min-w-max px-3 py-1.5 bg-gray-700 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                        Download PDF
-                    </span>
-                </div>
-                 <div className="relative group flex justify-center">
-                    <button 
-                        onClick={handlePrint} 
-                        className="bg-blue-600 text-white rounded-full p-4 shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform hover:scale-105"
-                        aria-label="Print Invoice"
-                    >
-                        <PrinterIcon className="h-6 w-6" />
-                    </button>
-                    <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 w-auto min-w-max px-3 py-1.5 bg-gray-700 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                        Print Invoice
-                    </span>
-                </div>
-                 <div className="relative group flex justify-center">
-                     <button 
-                        onClick={handleReset}
-                        className="bg-red-600 text-white rounded-full p-4 shadow-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-transform hover:scale-105"
-                        aria-label="Reset Invoice"
-                    >
-                        <ArrowUturnLeftIcon className="h-6 w-6" />
-                    </button>
-                    <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 w-auto min-w-max px-3 py-1.5 bg-gray-700 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                        Reset Invoice
-                    </span>
-                </div>
+             {/* Action Buttons */}
+            <div className="max-w-5xl mx-auto mt-6 flex justify-end items-center space-x-3 no-print">
+                <button onClick={handleReset} className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <ArrowUturnLeftIcon className="h-5 w-5 mr-2"/> Reset
+                </button>
+                <button onClick={handlePrint} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                     <PrinterIcon className="h-5 w-5 mr-2"/> Print
+                </button>
+                <button onClick={handleExportPdf} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                    <ArrowDownTrayIcon className="h-5 w-5 mr-2"/> Export PDF
+                </button>
             </div>
         </div>
     );
 };
 
-
-const rootElement = document.getElementById('root');
-if (!rootElement) {
-  throw new Error("Could not find root element to mount to");
-}
-const root = ReactDOM.createRoot(rootElement);
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
+root.render(<App />);
