@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, ChangeEvent, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
-import { PlusCircleIcon, TrashIcon, ArrowUturnLeftIcon, PrinterIcon } from '@heroicons/react/24/solid';
+import { PlusCircleIcon, TrashIcon, ArrowUturnLeftIcon, PrinterIcon, ArchiveBoxArrowDownIcon } from '@heroicons/react/24/solid';
 
 // --- TYPE DEFINITIONS ---
 interface SubItem {
@@ -43,7 +43,8 @@ interface AdjustmentItem {
 // Type declaration for jspdf from CDN
 declare global {
   interface Window {
-    jspdf: any;
+    jspdf: any; // jspdf itself is the constructor from the UMD bundle
+    jsPDF: any; // Add jsPDF to window as well for broader compatibility, though jspdf is primary
   }
 }
 
@@ -703,13 +704,22 @@ const App: React.FC = () => {
     };
     
     const handleExportPdf = () => {
-        if (!window.jspdf || !window.jspdf.jsPDF) {
-            showNotification('PDF generation library not loaded. Please refresh and try again.', 'error');
+        // Ensure window.jspdf is the actual jsPDF constructor, not the namespace object
+        // This handles cases where jsPDF.umd.min.js might expose it as window.jspdf or window.jspdf.jsPDF
+        // and ensures jspdf-autotable correctly extends the prototype.
+        let jsPDFConstructor = window.jsPDF; // Try to get the one directly extended by autotable
+
+        if (typeof jsPDFConstructor !== 'function' && typeof window.jspdf === 'function') {
+            jsPDFConstructor = window.jspdf; // Fallback if jspdf itself is the constructor
+            window.jsPDF = jsPDFConstructor; // Set for consistency with autotable's expected global
+        }
+        
+        if (typeof jsPDFConstructor !== 'function' || typeof jsPDFConstructor.prototype.autoTable !== 'function') {
+            showNotification('PDF generation library not loaded or autoTable plugin missing. Please refresh and try again.', 'error');
             return;
         }
         
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
+        const doc = new jsPDFConstructor();
 
         const pageHeight = doc.internal.pageSize.height;
         const pageWidth = doc.internal.pageSize.width;
@@ -787,10 +797,44 @@ const App: React.FC = () => {
                 mainItemContent += `\n${item.description}`;
             }
 
-            tableBody.push([
-                { content: index + 1, styles: { fontStyle: 'bold', fillColor: [255, 255, 255] } }, // S.N.
-                { content: mainItemContent, colSpan: isIntraState ? 10 : 9, styles: { fontStyle: 'bold', halign: 'left', fillColor: [255, 255, 255] } }, // DESCRIPTION to TOTAL
-            ]);
+            // Only add a main item row if it has sub-items or if it's a standalone item
+            if (item.subItems.length > 0) {
+                 tableBody.push([
+                    { content: index + 1, styles: { fontStyle: 'bold', fillColor: [255, 255, 255] } }, // S.N.
+                    { content: mainItemContent, colSpan: isIntraState ? 10 : 9, styles: { fontStyle: 'bold', halign: 'left', fillColor: [255, 255, 255] } }, // DESCRIPTION to TOTAL
+                ]);
+            } else {
+                // If no sub-items, render as a regular item row
+                if (isIntraState) {
+                    tableBody.push([
+                        index + 1, 
+                        mainItemContent, 
+                        item.hsn, 
+                        item.qty ?? '', 
+                        item.unit, 
+                        formatIndianNumber(item.price, 0), 
+                        item.itemAmount, 
+                        item.cgstRate, 
+                        item.cgstAmount, 
+                        item.sgstAmount, 
+                        item.totalAmount
+                    ]);
+                } else {
+                    tableBody.push([
+                        index + 1, 
+                        mainItemContent, 
+                        item.hsn, 
+                        item.qty ?? '', 
+                        item.unit, 
+                        formatIndianNumber(item.price, 0), 
+                        item.itemAmount, 
+                        item.igstRate, 
+                        item.igstAmount, 
+                        item.totalAmount
+                    ]);
+                }
+            }
+
 
             item.calculatedSubItems.forEach(subItem => {
                 let description = subItem.name;
@@ -811,7 +855,7 @@ const App: React.FC = () => {
                 ]);
 
                 // Sub-item Group Total Row (after sub-items)
-                const groupTotalRowStyle = { fontStyle: 'bold', fillColor: [255, 255, 255], textColor: 50 }; // No background for group total
+                const groupTotalRowStyle = { fontStyle: 'bold', fillColor: [240, 240, 240], textColor: 50 }; // Light gray background for group total
                 const groupTotalContent = `Group Total for ${item.name}`;
 
                 if (isIntraState) {
@@ -963,7 +1007,7 @@ const App: React.FC = () => {
 
 
     return (
-        <div className="bg-gray-100 min-h-screen p-4 sm:p-8 font-sans">
+        <div className="bg-white min-h-screen p-4 sm:p-8 font-sans">
              {notification && (
                 <div 
                   className={`no-print fixed top-5 right-5 p-4 rounded-lg shadow-lg text-white z-60 transition-transform transform ${
@@ -1237,7 +1281,7 @@ const App: React.FC = () => {
                                 <p><strong className="text-gray-700">IFSC:</strong> ICICI0000831</p>
                                 <p><strong className="text-gray-700">BANK:</strong> ICICI Bank</p>
                                 <p><strong className="text-gray-700">Branch:</strong> Laxmi Nagar</p>
-                                <p><strong className="text-gray-700">UPI ID:</strong> goodpsyche.ibz@ici</p>
+                                <p><strong className="text-gray-700">UPI ID:</strong> goodpsyche.ibz@icici</p>
                             </div>
                         </div>
                         <div>
@@ -1380,6 +1424,9 @@ const App: React.FC = () => {
             <div className="max-w-5xl mx-auto mt-6 flex justify-end items-center space-x-3 no-print">
                 <button onClick={handleReset} className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                     <ArrowUturnLeftIcon className="h-5 w-5 mr-2"/> Reset
+                </button>
+                <button onClick={handleExportPdf} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                    <ArchiveBoxArrowDownIcon className="h-5 w-5 mr-2"/> Export PDF
                 </button>
                 <button onClick={handlePrint} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                      <PrinterIcon className="h-5 w-5 mr-2"/> Print
