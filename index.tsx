@@ -43,8 +43,10 @@ interface AdjustmentItem {
 // Type declaration for jspdf from CDN
 declare global {
   interface Window {
-    jspdf: any; // jspdf itself is the constructor from the UMD bundle
-    jsPDF: any; // Add jsPDF to window as well for broader compatibility, though jspdf is primary
+    jspdf: {
+        jsPDF: any; // Explicitly define jsPDF as a constructor within window.jspdf
+    };
+    jsPDF: any; // Also expose directly at window.jsPDF for autotable compatibility
   }
 }
 
@@ -704,22 +706,21 @@ const App: React.FC = () => {
     };
     
     const handleExportPdf = () => {
-        // Ensure window.jspdf is the actual jsPDF constructor, not the namespace object
-        // This handles cases where jsPDF.umd.min.js might expose it as window.jspdf or window.jspdf.jsPDF
-        // and ensures jspdf-autotable correctly extends the prototype.
-        let jsPDFConstructor = window.jsPDF; // Try to get the one directly extended by autotable
-
-        if (typeof jsPDFConstructor !== 'function' && typeof window.jspdf === 'function') {
-            jsPDFConstructor = window.jspdf; // Fallback if jspdf itself is the constructor
-            window.jsPDF = jsPDFConstructor; // Set for consistency with autotable's expected global
+        // Ensure window.jsPDF is the actual jsPDF constructor, not the namespace object
+        // jspdf-autotable expects window.jsPDF to be the constructor it can extend.
+        // In UMD, window.jspdf is often the namespace, with jsPDF constructor inside it.
+        if (typeof window.jspdf === 'object' && typeof window.jspdf.jsPDF === 'function') {
+            window.jsPDF = window.jspdf.jsPDF;
+        } else if (typeof window.jspdf === 'function') {
+            window.jsPDF = window.jspdf;
         }
         
-        if (typeof jsPDFConstructor !== 'function' || typeof jsPDFConstructor.prototype.autoTable !== 'function') {
+        if (typeof window.jsPDF !== 'function' || typeof window.jsPDF.prototype.autoTable !== 'function') {
             showNotification('PDF generation library not loaded or autoTable plugin missing. Please refresh and try again.', 'error');
             return;
         }
         
-        const doc = new jsPDFConstructor();
+        const doc = new window.jsPDF();
 
         const pageHeight = doc.internal.pageSize.height;
         const pageWidth = doc.internal.pageSize.width;
@@ -980,25 +981,48 @@ const App: React.FC = () => {
         doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, leftFinalY + 5);
         leftFinalY += wrappedAmount.length * 5;
         
-        y = Math.max(leftFinalY, rightFinalY) + 15;
+        // Take the maximum Y position from both columns to determine where the next content starts
+        y = Math.max(leftFinalY, rightFinalY) + 15; 
+        
+        // Calculate the total height the footer elements will occupy from the top of its first line
+        // This includes: first separator line, "For GOODPSYCHE" text, signature space, second separator line, "Authorised Signatory" text
+        const estimatedFooterContentHeight = 
+            0.5 + // First line thickness
+            7 + // space after first line
+            5 + // "For GOODPSYCHE" text baseline offset + its own height (approx)
+            40 + // signature block empty space
+            0.2 + // Second line thickness
+            5 + // space after second line
+            5; // "Authorised Signatory" text height (assuming 5 units from baseline)
+
+        // This is the absolute Y coordinate where the first footer line should ideally start to be at the bottom
+        const idealFooterStartY = pageHeight - margin - estimatedFooterContentHeight;
+
+        // Check if current content ends too close to the ideal footer start position,
+        // potentially pushing the footer off the page or making it too cramped.
+        // If 'y' is already lower than 'idealFooterStartY' (with a small buffer), add a new page.
+        if (y > idealFooterStartY - 10) { 
+            doc.addPage();
+            y = margin; // Reset y for the new page
+        }
+
+        // Now, force 'y' to be at least the ideal starting position for the footer.
+        // This pushes 'y' down if there's significant empty space on the current page.
+        y = Math.max(y, idealFooterStartY);
         
         // --- FOOTER ---
-        if (y > pageHeight - 50) {
-            doc.addPage();
-            y = margin;
-        }
-        
         doc.setLineWidth(0.5).line(margin, y, pageWidth - margin, y);
-        y += 7;
+        let currentFooterY = y; // Use a new variable to track y within footer drawing
+        currentFooterY += 7;
         
         const footerRightX = pageWidth - margin;
         
-        doc.setFont('helvetica', 'bold').setFontSize(10).text('For GOODPSYCHE', footerRightX, y + 5, { align: 'right' });
+        doc.setFont('helvetica', 'bold').setFontSize(10).text('For GOODPSYCHE', footerRightX, currentFooterY + 5, { align: 'right' }); 
         
-        y += 40;
-        doc.setLineWidth(0.2).line(footerRightX - 60, y, footerRightX, y);
-        y += 5;
-        doc.setFont('helvetica', 'bold').setFontSize(10).text('Authorised Signatory', footerRightX, y, { align: 'right' });
+        currentFooterY += 40; // Add space for signature
+        doc.setLineWidth(0.2).line(footerRightX - 60, currentFooterY, footerRightX, currentFooterY);
+        currentFooterY += 5; // Space after signature line
+        doc.setFont('helvetica', 'bold').setFontSize(10).text('Authorised Signatory', footerRightX, currentFooterY, { align: 'right' });
         
         // --- SAVE ---
         doc.save(`Invoice-${invoiceDetails.invoiceNo || 'draft'}.pdf`);
