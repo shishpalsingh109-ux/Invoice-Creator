@@ -1007,17 +1007,20 @@ const App: React.FC = () => {
         doc.text(termsLines, margin, leftFinalY);
         leftFinalY += termsLines.length * 4 + 8; // Increased space after terms
         
-        // Amount in Words
-        doc.setFontSize(10).setFont('helvetica', 'normal');
-        const amountInWords = `Rupees ${numberToWords(calculations.amountDueRounded)}`;
-        const wrappedAmount = doc.splitTextToSize(amountInWords, leftBlockPdfWidth);
-        doc.text('Amount in Words:', margin, leftFinalY);
-        leftFinalY += 5; // Add space for the title line
-        doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, leftFinalY);
-        leftFinalY += wrappedAmount.length * 5; // Add space for the wrapped amount text
-        
         // Take the maximum Y position from both columns to determine where the next content starts
         y = Math.max(leftFinalY, rightFinalY) + 15; 
+        
+        // Separator Line
+        doc.setLineWidth(0.2).line(margin, y - 8, pageWidth - margin, y - 8);
+        
+        // Amount in Words (Full Width)
+        doc.setFontSize(10).setFont('helvetica', 'normal');
+        const amountInWords = `Rupees ${numberToWords(calculations.amountDueRounded)}`;
+        const wrappedAmount = doc.splitTextToSize(amountInWords, pageWidth - margin * 2);
+        doc.text('Amount in Words:', margin, y);
+        y += 5; // Add space for the title line
+        doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, y);
+        y += wrappedAmount.length * 5; // Adjust y for next content
         
         // --- FOOTER POSITIONING LOGIC ---
         // Estimated total vertical space the footer will occupy (from its top line to the bottom of the signatory text).
@@ -1311,7 +1314,7 @@ const App: React.FC = () => {
                     </div>
                 </section>
 
-                {/* Totals, Bank, Terms & Amount in Words */}
+                {/* Totals, Bank, Terms */}
                 <section className="mt-6 flex flex-col md:flex-row justify-between gap-8">
                     <div className="w-full md:w-7/12 flex flex-col gap-4">
                         <div>
@@ -1332,11 +1335,6 @@ const App: React.FC = () => {
                                 onChange={(e) => setTerms(e.target.value)}
                                 className="text-xs text-gray-500 w-full p-2 border border-gray-200 rounded-md"
                             />
-                        </div>
-                        <div className="mt-2">
-                            <p className="text-sm text-gray-600">
-                                Amount in Words: <span className="font-semibold text-gray-800">{`Rupees ${numberToWords(calculations.amountDueRounded)}`}</span>
-                            </p>
                         </div>
                     </div>
                     <div className="w-full md:w-5/12 text-gray-700 text-sm">
@@ -1446,6 +1444,13 @@ const App: React.FC = () => {
                             </div>
                         </div>
                     </div>
+                </section>
+
+                {/* Amount in Words */}
+                <section className="mt-8 pt-4 border-t border-gray-200">
+                    <p className="text-sm text-gray-600">
+                        Amount in Words: <span className="font-semibold text-gray-800">{`Rupees ${numberToWords(calculations.amountDueRounded)}`}</span>
+                    </p>
                 </section>
                 
                 {/* Footer */}
