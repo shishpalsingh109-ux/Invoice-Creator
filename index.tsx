@@ -740,6 +740,11 @@ const App: React.FC = () => {
     };
     
     const handleExportPdf = () => {
+        // Ensure jsPDF is available on the window for the autoTable plugin, which might look for window.jsPDF
+        if (window.jspdf && window.jspdf.jsPDF && !window.jsPDF) {
+            window.jsPDF = window.jspdf.jsPDF;
+        }
+
         // Attempt to get the jsPDF constructor from window.jsPDF or window.jspdf.jsPDF
         const JsPDF = window.jsPDF || (window.jspdf && window.jspdf.jsPDF);
         
@@ -900,7 +905,7 @@ const App: React.FC = () => {
                 } else { // Inter-state
                     tableBody.push([
                         { content: '', styles: groupTotalRowStyle }, // S.N.
-                        { content: groupTotalContent, colSpan: 5, styles: { ...groupTotalRowStyle, halign: 'right' } }, // DESCRIPTION to AMOUNT
+                        { content: groupTotalContent, colSpan: 6, styles: { ...groupTotalRowStyle, halign: 'right' } }, // DESCRIPTION to AMOUNT
                         { content: '', styles: groupTotalRowStyle }, // IGST % (empty)
                         { content: item.mainItemIgst, styles: { ...groupTotalRowStyle, halign: 'right' } }, // IGST Amt
                         { content: item.totalAmount, styles: { ...groupTotalRowStyle, halign: 'right' } }, // Total
@@ -989,7 +994,7 @@ const App: React.FC = () => {
         doc.setFontSize(9).setFont('helvetica', 'bold').text('Bank Details', margin, leftFinalY);
         leftFinalY += 5;
         doc.setFontSize(8).setFont('helvetica', 'normal');
-        const bankDetails = `Account Name: GoodPhysche\nAccount No: 083105501016\nIFSC : ICICI0000831\nBANK: ICICI Bank\nBranch: Laxmi Nagar\nUPI ID: goodpsyche.ibz@icici`;
+        const bankDetails = `Account Name: GoodPsyche\nAccount No: 083105501016\nIFSC : ICICI0000831\nBANK: ICICI Bank\nBranch: Laxmi Nagar\nUPI ID: goodpsyche.ibz@icici`;
         const bankDetailsLines = doc.splitTextToSize(bankDetails, leftBlockPdfWidth);
         doc.text(bankDetailsLines, margin, leftFinalY);
         leftFinalY += bankDetailsLines.length * 4 + 5;
@@ -1000,15 +1005,16 @@ const App: React.FC = () => {
         doc.setFontSize(8).setFont('helvetica', 'normal');
         const termsLines = doc.splitTextToSize(terms, leftBlockPdfWidth);
         doc.text(termsLines, margin, leftFinalY);
-        leftFinalY += termsLines.length * 4 + 5;
+        leftFinalY += termsLines.length * 4 + 8; // Increased space after terms
         
         // Amount in Words
         doc.setFontSize(10).setFont('helvetica', 'normal');
         const amountInWords = `Rupees ${numberToWords(calculations.amountDueRounded)}`;
         const wrappedAmount = doc.splitTextToSize(amountInWords, leftBlockPdfWidth);
         doc.text('Amount in Words:', margin, leftFinalY);
-        doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, leftFinalY + 5);
-        leftFinalY += wrappedAmount.length * 5;
+        leftFinalY += 5; // Add space for the title line
+        doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, leftFinalY);
+        leftFinalY += wrappedAmount.length * 5; // Add space for the wrapped amount text
         
         // Take the maximum Y position from both columns to determine where the next content starts
         y = Math.max(leftFinalY, rightFinalY) + 15; 
@@ -1311,7 +1317,7 @@ const App: React.FC = () => {
                         <div>
                             <h4 className="font-semibold text-gray-700 mb-2">Bank Details</h4>
                             <div className="text-xs text-gray-600 p-2 border border-gray-200 rounded-md space-y-1">
-                                <p><strong className="text-gray-700">Account Name:</strong> GoodPhysche</p>
+                                <p><strong className="text-gray-700">Account Name:</strong> GoodPsyche</p>
                                 <p><strong className="text-gray-700">Account No:</strong> 083105501016</p>
                                 <p><strong className="text-gray-700">IFSC:</strong> ICICI0000831</p>
                                 <p><strong className="text-gray-700">BANK:</strong> ICICI Bank</p>
@@ -1327,7 +1333,7 @@ const App: React.FC = () => {
                                 className="text-xs text-gray-500 w-full p-2 border border-gray-200 rounded-md"
                             />
                         </div>
-                        <div>
+                        <div className="mt-2">
                             <p className="text-sm text-gray-600">
                                 Amount in Words: <span className="font-semibold text-gray-800">{`Rupees ${numberToWords(calculations.amountDueRounded)}`}</span>
                             </p>
