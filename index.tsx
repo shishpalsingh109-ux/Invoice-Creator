@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, ChangeEvent, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
-import { PlusCircleIcon, TrashIcon, ArrowUturnLeftIcon, PrinterIcon, ArchiveBoxArrowDownIcon } from '@heroicons/react/24/solid';
+import { PlusCircleIcon, TrashIcon, ArrowUturnLeftIcon, PrinterIcon } from '@heroicons/react/24/solid';
 
 // --- TYPE DEFINITIONS ---
 interface SubItem {
@@ -37,17 +37,6 @@ interface AdjustmentItem {
   name: string;
   amount: number;
   operation: 'add' | 'subtract';
-}
-
-
-// Type declaration for jspdf from CDN
-declare global {
-  interface Window {
-    jspdf: { // This might be a namespace in UMD, check if jsPDF constructor is nested
-        jsPDF?: any; 
-    };
-    jsPDF: any; // The actual jsPDF constructor that jspdf-autotable extends
-  }
 }
 
 // --- CONSTANTS ---
@@ -312,40 +301,6 @@ const notificationBgClasses = {
     error: 'bg-red-500',
 };
 
-// Helper function to draw the footer and return the final Y position
-const drawPdfFooter = (doc: any, startY: number, pageWidth: number, margin: number): number => {
-    const footerRightX = pageWidth - margin;
-    let currentY = startY;
-    const textFontSize = 10;
-    const estimatedTextHeight = textFontSize * 1.2; // Rough estimate for 10pt text height
-
-    // Line 1: Separator line (top of the footer block)
-    doc.setLineWidth(0.5);
-    doc.line(margin, currentY, pageWidth - margin, currentY);
-    currentY += 7; // Space after this line
-
-    // "For GOODPSYCHE" text
-    doc.setFont('helvetica', 'bold').setFontSize(textFontSize);
-    doc.text('For GOODPSYCHE', footerRightX, currentY + estimatedTextHeight * 0.7, { align: 'right' }); // Position baseline
-    currentY += estimatedTextHeight + 5; // Advance past text and add some padding
-
-    // Signature empty space (40 units)
-    currentY += 40;
-
-    // Signature line
-    const signatureLineLength = 60;
-    doc.setLineWidth(0.2);
-    doc.line(footerRightX - signatureLineLength, currentY, footerRightX, currentY);
-    currentY += 5; // Space after signature line
-
-    // "Authorised Signatory" text
-    doc.setFont('helvetica', 'bold').setFontSize(textFontSize);
-    doc.text('Authorised Signatory', footerRightX, currentY + estimatedTextHeight * 0.7, { align: 'right' }); // Position baseline
-    currentY += estimatedTextHeight; // Advance past text
-
-    return currentY;
-};
-
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
     // --- STATE MANAGEMENT ---
@@ -372,7 +327,7 @@ const App: React.FC = () => {
         }] as InvoiceItem[],
         preTaxItems: [] as AdjustmentItem[],
         postTaxItems: [] as AdjustmentItem[],
-        terms: `1. Goods once sold will not be taken back.\n2. Interest @ 18% p.a. will be charged if the payment is not made within the stipulated time.\n3. Subject to 'Delhi' Jurisdiction only.`,
+        terms: `1. Goods/Services once sold/provided will not be taken back.\n2. Interest @ 18% p.a. will be charged if the payment is not made within the stipulated time.\n3. Subject to 'Delhi' Jurisdiction only.`,
         invoiceTitle: 'Tax Invoice',
         invoiceSubtitle: 'Original Copy',
     });
@@ -403,7 +358,7 @@ const App: React.FC = () => {
     
     // --- VALIDATION ---
     const validateGstin = (gstin: string): string => {
-        if (!gstin) return '';
+        if (!gstin) return 'GSTIN cannot be empty.';
         const gstinRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}[A-Z]{2}$/;
         const stateCode = gstin.substring(0, 2);
 
@@ -417,12 +372,19 @@ const App: React.FC = () => {
         return '';
     };
 
-    // Auto-update Place of Supply from GSTIN
+    // Auto-fill Shipped to details from Billed to details (with manual override)
+    useEffect(() => {
+        const prevBilledTo = prevBilledToRef.current;
+        if (JSON.stringify(shippedTo) === JSON.stringify(prevBilledTo)) { // only auto-fill if shippedTo hasn't been manually changed from default
+            setShippedTo(billedTo);
+        }
+        prevBilledToRef.current = billedTo;
+    }, [billedTo, shippedTo]);
+
+    // Auto-update Place of Supply from Billed To GSTIN
     useEffect(() => {
         const gstin = billedTo.gstin;
-        const isValid = validateGstin(gstin) === '';
-        
-        if (isValid && gstin.trim().length >= 2) {
+        if (validateGstin(gstin) === '') { // An empty string from validateGstin means it's valid
             const stateCode = gstin.substring(0, 2);
             const stateName = stateCodeMap[stateCode];
             if (stateName) {
@@ -433,15 +395,6 @@ const App: React.FC = () => {
             }
         }
     }, [billedTo.gstin]);
-
-    // Auto-fill Shipped to details from Billed to details (with manual override)
-    useEffect(() => {
-        const prevBilledTo = prevBilledToRef.current;
-        if (JSON.stringify(shippedTo) === JSON.stringify(prevBilledTo)) { // only auto-fill if shippedTo hasn't been manually changed from default
-            setShippedTo(billedTo);
-        }
-        prevBilledToRef.current = billedTo;
-    }, [billedTo, shippedTo]);
     
     // Convert tax rates when tax type (intra/inter-state) changes
     useEffect(() => {
@@ -490,7 +443,8 @@ const App: React.FC = () => {
     
     const handleGstinChange = (party: 'billedTo' | 'shippedTo', value: string) => {
         const upperValue = value.toUpperCase();
-        const error = validateGstin(upperValue);
+        // Allow empty string without error, but validate if not empty
+        const error = upperValue ? validateGstin(upperValue) : '';
 
         setGstinErrors(prev => ({ ...prev, [party]: error }));
 
@@ -599,7 +553,7 @@ const App: React.FC = () => {
     };
     const removePreTaxItem = (id: string) => setPreTaxItems(preTaxItems.filter(item => item.id !== id));
 
-    const addPostTaxItem = () => setPostTaxItems([...postTaxItems, { id: Date.now().toString(), name: 'Advance Paid', amount: 0, operation: 'subtract' }]);
+    const addPostTaxItem = () => setPostTaxItems([...postTaxItems, { id: Date.now().toString(), name: 'Discount', amount: 0, operation: 'subtract' }]);
     const handlePostTaxItemChange = (id: string, field: keyof Omit<AdjustmentItem, 'id'>, value: string | number) => {
         setPostTaxItems(postTaxItems.map(item => item.id === id ? { ...item, [field]: value } : item));
     };
@@ -738,317 +692,6 @@ const App: React.FC = () => {
     const handlePrint = () => {
         window.print();
     };
-    
-    const handleExportPdf = () => {
-        // Ensure jsPDF is available on the window for the autoTable plugin, which might look for window.jsPDF
-        if (window.jspdf && window.jspdf.jsPDF && !window.jsPDF) {
-            window.jsPDF = window.jspdf.jsPDF;
-        }
-
-        // Attempt to get the jsPDF constructor from window.jsPDF or window.jspdf.jsPDF
-        const JsPDF = window.jsPDF || (window.jspdf && window.jspdf.jsPDF);
-        
-        // Ensure JsPDF constructor and autoTable plugin are loaded
-        if (typeof JsPDF !== 'function' || typeof JsPDF.prototype.autoTable !== 'function') {
-            showNotification('PDF generation library not loaded or autoTable plugin missing. Please refresh and try again.', 'error');
-            return;
-        }
-        
-        const doc = new JsPDF();
-
-        const pageHeight = doc.internal.pageSize.height;
-        const pageWidth = doc.internal.pageSize.width;
-        const margin = 15;
-        let y = margin;
-
-        // --- HEADER ---
-        doc.setFontSize(20).setFont('helvetica', 'bold');
-        doc.text('GOODPSYCHE', margin, y);
-
-        doc.setFontSize(22).setFont('helvetica', 'bold');
-        doc.text(invoiceTitle, pageWidth - margin, margin, { align: 'right' });
-        doc.setFontSize(10).setFont('helvetica', 'normal');
-        doc.text(invoiceSubtitle, pageWidth - margin, margin + 5, { align: 'right' });
-
-        y += 8;
-        doc.setFontSize(9).setFont('helvetica', 'normal');
-        const companyAddress = 'Basement M-29, Vinoba Puri, Near Round Park Near Parking, Lajpat Nagar New Delhi South East Delhi, 110024';
-        const addressLines = doc.splitTextToSize(companyAddress, 100);
-        doc.text(addressLines, margin, y);
-        y += addressLines.length * 4 + 1;
-        doc.text('GSTIN: 07AAWFG0897P1ZA', margin, y);
-        
-        y += 10;
-        doc.setLineWidth(0.5).line(margin, y, pageWidth - margin, y); // separator line
-        y += 10;
-        
-        // --- PARTY & INVOICE DETAILS ---
-        const leftBlockWidth = (pageWidth / 2) - margin - 5;
-        const rightBlockX = pageWidth / 2 + 5;
-        let leftY = y;
-        let rightY = y;
-        
-        // Left Side: Party Details
-        doc.setFontSize(10).setFont('helvetica', 'bold').text('Billed to:', margin, leftY);
-        leftY += 5;
-        doc.setFont('helvetica', 'normal');
-        const billedToLines = doc.splitTextToSize(`${billedTo.name}\n${billedTo.address}\nGSTIN: ${billedTo.gstin}`, leftBlockWidth);
-        doc.text(billedToLines, margin, leftY);
-        leftY += billedToLines.length * 4.5 + 5;
-
-        doc.setFont('helvetica', 'bold').text('Shipped to:', margin, leftY);
-        leftY += 5;
-        doc.setFont('helvetica', 'normal');
-        const shippedToLines = doc.splitTextToSize(`${shippedTo.name}\n${shippedTo.address}\nGSTIN: ${shippedTo.gstin}`, leftBlockWidth);
-        doc.text(shippedToLines, margin, leftY);
-        
-        // Right Side: Invoice Details
-        const rightLabelX = rightBlockX;
-        const rightValueX = pageWidth - margin;
-        doc.setFont('helvetica', 'bold').text('Invoice No.:', rightLabelX, rightY);
-        doc.setFont('helvetica', 'normal').text(invoiceDetails.invoiceNo, rightValueX, rightY, { align: 'right' });
-        rightY += 7;
-        doc.setFont('helvetica', 'bold').text('Dated:', rightLabelX, rightY);
-        doc.setFont('helvetica', 'normal').text(invoiceDetails.dated, rightValueX, rightY, { align: 'right' });
-        rightY += 7;
-        doc.setFont('helvetica', 'bold').text('Place of Supply:', rightLabelX, rightY);
-        doc.setFont('helvetica', 'normal').text(invoiceDetails.placeOfSupply, rightValueX, rightY, { align: 'right' });
-        rightY += 7;
-        doc.setFont('helvetica', 'bold').text('Reverse Charge:', rightLabelX, rightY);
-        doc.setFont('helvetica', 'normal').text('N', rightValueX, rightY, { align: 'right' });
-
-        y = Math.max(leftY, rightY) + 15;
-
-        // --- ITEMS TABLE ---
-        const tableHead = isIntraState
-            ? [['S.N.', 'DESCRIPTION OF GOODS/SERVICES', 'HSN', 'Qty', 'Unit', 'Price', 'Amount', 'Tax %', 'CGST Amt', 'SGST Amt', 'Total']]
-            : [['S.N.', 'DESCRIPTION OF GOODS/SERVICES', 'HSN', 'Qty', 'Unit', 'Price', 'Amount', 'IGST %', 'IGST Amt', 'Total']];
-        
-        const tableBody: any[] = [];
-        calculations.calculatedItems.forEach((item, index) => {
-            // Main Item Header Row (bold, no background, no totals)
-            let mainItemContent = item.name;
-            if (item.description) {
-                mainItemContent += `\n${item.description}`;
-            }
-
-            // Only add a main item row if it has sub-items or if it's a standalone item
-            if (item.subItems.length > 0) {
-                 tableBody.push([
-                    { content: index + 1, styles: { fontStyle: 'bold', fillColor: [255, 255, 255] } }, // S.N.
-                    { content: mainItemContent, colSpan: isIntraState ? 10 : 9, styles: { fontStyle: 'bold', halign: 'left', fillColor: [255, 255, 255] } }, // DESCRIPTION to TOTAL
-                ]);
-            } else {
-                // If no sub-items, render as a regular item row
-                if (isIntraState) {
-                    tableBody.push([
-                        index + 1, 
-                        mainItemContent, 
-                        item.hsn, 
-                        item.qty ?? '', 
-                        item.unit, 
-                        formatIndianNumber(item.price, 0), 
-                        item.itemAmount, 
-                        item.cgstRate, 
-                        item.cgstAmount, 
-                        item.sgstAmount, 
-                        item.totalAmount
-                    ]);
-                } else {
-                    tableBody.push([
-                        index + 1, 
-                        mainItemContent, 
-                        item.hsn, 
-                        item.qty ?? '', 
-                        item.unit, 
-                        formatIndianNumber(item.price, 0), 
-                        item.itemAmount, 
-                        item.igstRate, 
-                        item.igstAmount, 
-                        item.totalAmount
-                    ]);
-                }
-            }
-
-
-            item.calculatedSubItems.forEach(subItem => {
-                let description = subItem.name;
-                if (subItem.description) {
-                    description += `\n${subItem.description}`;
-                }
-                if (isIntraState) {
-                     tableBody.push(['', description, subItem.hsn, subItem.qty ?? '', subItem.unit, formatIndianNumber(subItem.price, 0), subItem.itemAmount, subItem.cgstRate, subItem.cgstAmount, subItem.sgstAmount, subItem.totalAmount]);
-                } else {
-                     tableBody.push(['', description, subItem.hsn, subItem.qty ?? '', subItem.unit, formatIndianNumber(subItem.price, 0), subItem.itemAmount, subItem.igstRate, subItem.igstAmount, subItem.totalAmount]);
-                }
-            });
-            
-            if (item.subItems.length > 0) {
-                // Add empty row for spacing
-                tableBody.push([
-                    { content: '', colSpan: isIntraState ? 11 : 10, styles: { fillColor: [255, 255, 255], minCellHeight: 3 } }
-                ]);
-
-                // Sub-item Group Total Row (after sub-items)
-                const groupTotalRowStyle = { fontStyle: 'bold', fillColor: [240, 240, 240], textColor: 50 }; // Light gray background for group total
-                const groupTotalContent = `Group Total for ${item.name}`;
-
-                if (isIntraState) {
-                    tableBody.push([
-                        { content: '', styles: groupTotalRowStyle }, // S.N.
-                        { content: groupTotalContent, colSpan: 6, styles: { ...groupTotalRowStyle, halign: 'right' } }, // DESCRIPTION to AMOUNT
-                        { content: '', styles: groupTotalRowStyle }, // Tax % (empty)
-                        { content: item.mainItemCgst, styles: { ...groupTotalRowStyle, halign: 'right' } }, // CGST Amt
-                        { content: item.mainItemSgst, styles: { ...groupTotalRowStyle, halign: 'right' } }, // SGST Amt
-                        { content: item.totalAmount, styles: { ...groupTotalRowStyle, halign: 'right' } }, // Total
-                    ]);
-                } else { // Inter-state
-                    tableBody.push([
-                        { content: '', styles: groupTotalRowStyle }, // S.N.
-                        { content: groupTotalContent, colSpan: 6, styles: { ...groupTotalRowStyle, halign: 'right' } }, // DESCRIPTION to AMOUNT
-                        { content: '', styles: groupTotalRowStyle }, // IGST % (empty)
-                        { content: item.mainItemIgst, styles: { ...groupTotalRowStyle, halign: 'right' } }, // IGST Amt
-                        { content: item.totalAmount, styles: { ...groupTotalRowStyle, halign: 'right' } }, // Total
-                    ]);
-                }
-            }
-        });
-        
-        (doc as any).autoTable({
-            head: tableHead, body: tableBody, startY: y, theme: 'grid',
-            headStyles: { fillColor: [230, 230, 230], textColor: 20, fontSize: 8, fontStyle: 'bold' },
-            styles: { fontSize: 8, cellPadding: 1.5, valign: 'top' },
-            columnStyles: {
-                0: { cellWidth: 10 },
-                1: { cellWidth: 'auto' },
-                3: { halign: 'right' },
-                5: { halign: 'right' },
-                6: { halign: 'right' },
-                7: { halign: 'right' },
-                8: { halign: 'right' },
-                9: { halign: 'right' },
-                10: { halign: 'right' },
-            },
-        });
-
-        y = (doc as any).autoTable.previous.finalY + 10;
-        const startY = y;
-        let leftFinalY = startY;
-        let rightFinalY = startY;
-
-        // --- TOTALS (RIGHT) ---
-        const totalsX = pageWidth * 0.6;
-        doc.setFontSize(10).setFont('helvetica', 'normal');
-        doc.text('Subtotal:', totalsX, rightFinalY);
-        doc.text(`₹ ${calculations.subtotal}`, pageWidth - margin, rightFinalY, { align: 'right' });
-        rightFinalY += 7;
-
-        preTaxItems.forEach(item => {
-            doc.text(`${item.name}:`, totalsX, rightFinalY);
-            const amountText = `${item.operation === 'subtract' ? '-' : ''} ₹ ${formatIndianNumber(item.amount, 0)}`;
-            doc.text(amountText, pageWidth - margin, rightFinalY, { align: 'right' });
-            rightFinalY += 7;
-        });
-
-        doc.setFont('helvetica', 'bold');
-        doc.text('Taxable Amount:', totalsX, rightFinalY);
-        doc.text(`₹ ${calculations.taxableAmount}`, pageWidth - margin, rightFinalY, { align: 'right' });
-        rightFinalY += 7;
-        doc.setFont('helvetica', 'normal');
-
-        if (isIntraState) {
-            doc.text('CGST Amount:', totalsX, rightFinalY);
-            doc.text(`₹ ${calculations.totalCgst}`, pageWidth - margin, rightFinalY, { align: 'right' });
-            rightFinalY += 7;
-            doc.text('SGST Amount:', totalsX, rightFinalY);
-            doc.text(`₹ ${calculations.totalSgst}`, pageWidth - margin, rightFinalY, { align: 'right' });
-            rightFinalY += 7;
-        } else {
-            doc.text('IGST Amount:', totalsX, rightFinalY);
-            doc.text(`₹ ${calculations.totalIgst}`, pageWidth - margin, rightFinalY, { align: 'right' });
-            rightFinalY += 7;
-        }
-
-        doc.setLineWidth(0.2).line(totalsX - 5, rightFinalY - 2, pageWidth - margin, rightFinalY - 2);
-        doc.setFontSize(11).setFont('helvetica', 'bold');
-        doc.text('Grand Total:', totalsX, rightFinalY);
-        doc.text(`₹ ${calculations.grandTotal}`, pageWidth - margin, rightFinalY, { align: 'right' });
-        rightFinalY += 7;
-        doc.setFontSize(10).setFont('helvetica', 'normal');
-        
-        postTaxItems.forEach(item => {
-            doc.text(`${item.name}:`, totalsX, rightFinalY);
-            const amountText = `${item.operation === 'subtract' ? '-' : ''} ₹ ${formatIndianNumber(item.amount, 0)}`;
-            doc.text(amountText, pageWidth - margin, rightFinalY, { align: 'right' });
-            rightFinalY += 7;
-        });
-
-        doc.setFontSize(12).setFont('helvetica', 'bold');
-        doc.text('Amount Due:', totalsX, rightFinalY);
-        doc.text(`₹ ${calculations.amountDue}`, pageWidth - margin, rightFinalY, { align: 'right' });
-        
-        // --- BANK, TERMS & AMOUNT IN WORDS (LEFT) ---
-        const leftBlockPdfWidth = pageWidth * 0.58 - margin;
-        
-        // Bank Details
-        doc.setFontSize(9).setFont('helvetica', 'bold').text('Bank Details', margin, leftFinalY);
-        leftFinalY += 5;
-        doc.setFontSize(8).setFont('helvetica', 'normal');
-        const bankDetails = `Account Name: GoodPsyche\nAccount No: 083105501016\nIFSC : ICICI0000831\nBANK: ICICI Bank\nBranch: Laxmi Nagar\nUPI ID: goodpsyche.ibz@icici`;
-        const bankDetailsLines = doc.splitTextToSize(bankDetails, leftBlockPdfWidth);
-        doc.text(bankDetailsLines, margin, leftFinalY);
-        leftFinalY += bankDetailsLines.length * 4 + 5;
-
-        // Terms & Conditions
-        doc.setFontSize(9).setFont('helvetica', 'bold').text('Terms & Conditions', margin, leftFinalY);
-        leftFinalY += 5;
-        doc.setFontSize(8).setFont('helvetica', 'normal');
-        const termsLines = doc.splitTextToSize(terms, leftBlockPdfWidth);
-        doc.text(termsLines, margin, leftFinalY);
-        leftFinalY += termsLines.length * 4 + 8; // Increased space after terms
-        
-        // Take the maximum Y position from both columns to determine where the next content starts
-        y = Math.max(leftFinalY, rightFinalY) + 15; 
-        
-        // Separator Line
-        doc.setLineWidth(0.2).line(margin, y - 8, pageWidth - margin, y - 8);
-        
-        // Amount in Words (Full Width)
-        doc.setFontSize(10).setFont('helvetica', 'normal');
-        const amountInWords = `Rupees ${numberToWords(calculations.amountDueRounded)}`;
-        const wrappedAmount = doc.splitTextToSize(amountInWords, pageWidth - margin * 2);
-        doc.text('Amount in Words:', margin, y);
-        y += 5; // Add space for the title line
-        doc.setFont('helvetica', 'bold').text(wrappedAmount, margin, y);
-        y += wrappedAmount.length * 5; // Adjust y for next content
-        
-        // --- FOOTER POSITIONING LOGIC ---
-        // Estimated total vertical space the footer will occupy (from its top line to the bottom of the signatory text).
-        // This includes: Line1_space (7) + Text1_height+padding (12+5) + Signature_blank_space (40) + Line2_space (5) + Text2_height (12)
-        const requiredSpaceForFooter = 7 + (12 + 5) + 40 + 5 + 12; // ~81 units
-        
-        // Calculate the absolute minimum Y position where the footer's top line must start
-        // to fit entirely on the current page without going into the bottom margin.
-        const absoluteMinimumFooterStartY = pageHeight - margin - requiredSpaceForFooter;
-
-        // Check if the current content `y` position is past this minimum,
-        // meaning the footer would overlap with content or go off the page.
-        // If so, add a new page.
-        if (y > absoluteMinimumFooterStartY) { 
-            doc.addPage();
-            y = margin; // Reset y to the top margin for the new page
-        }
-
-        // Now, draw the footer. It should start at the current `y` position (if enough space)
-        // or be pushed down to `absoluteMinimumFooterStartY` (if there's blank space to fill),
-        // effectively pinning it to the bottom-ish of the page.
-        drawPdfFooter(doc, Math.max(y, absoluteMinimumFooterStartY), pageWidth, margin);
-        
-        // --- SAVE ---
-        doc.save(`Invoice-${invoiceDetails.invoiceNo || 'draft'}.pdf`);
-        showNotification('PDF exported successfully!', 'success');
-    };
-
 
     return (
         <div className="bg-white min-h-screen p-4 sm:p-8 font-sans">
@@ -1132,7 +775,17 @@ const App: React.FC = () => {
                         <EditableField value={invoiceDetails.invoiceNo} onChange={(e) => setInvoiceDetails({...invoiceDetails, invoiceNo: e.target.value})} className="text-right w-full" />
                         
                         <span className="font-semibold whitespace-nowrap">Place of Supply:</span>
-                        <EditableField value={invoiceDetails.placeOfSupply} onChange={(e) => setInvoiceDetails({...invoiceDetails, placeOfSupply: e.target.value})} className="text-right w-full" />
+                        <select
+                            value={invoiceDetails.placeOfSupply}
+                            onChange={(e) => setInvoiceDetails({ ...invoiceDetails, placeOfSupply: e.target.value })}
+                            className="bg-transparent text-right w-full focus:outline-none focus:bg-blue-50/50 rounded-md p-1"
+                        >
+                            {Object.entries(stateCodeMap).map(([code, name]) => (
+                                <option key={code} value={`${name} (${code})`}>
+                                    {name} ({code})
+                                </option>
+                            ))}
+                        </select>
 
                         <span className="font-semibold whitespace-nowrap">Dated:</span>
                         <input type="date" value={invoiceDetails.dated} onChange={(e) => setInvoiceDetails({...invoiceDetails, dated: e.target.value})} className="bg-transparent text-right w-full focus:outline-none focus:bg-blue-50/50 rounded-md p-1"/>
@@ -1152,21 +805,21 @@ const App: React.FC = () => {
                                 <th className="px-1 py-3 w-[8%]">HSN/SAC</th>
                                 <th className="px-1 py-3 w-[5%] text-right">Qty</th>
                                 <th className="px-1 py-3 w-[6%]">Unit</th>
-                                <th className="px-2 py-3 w-[8%] text-right">Price</th>
-                                <th className="px-2 py-3 w-[8%] text-right">Amount</th>
+                                <th className="px-2 py-3 w-[8%] text-right">Price (₹)</th>
+                                <th className="px-2 py-3 w-[8%] text-right">Amount (₹)</th>
                                 {isIntraState ? (
                                     <>
                                         <th className="px-1 py-3 w-[6%] text-center">Tax %</th>
-                                        <th className="px-1 py-3 w-[7%] text-right">CGST Amt</th>
-                                        <th className="px-1 py-3 w-[7%] text-right">SGST Amt</th>
+                                        <th className="px-1 py-3 w-[7%] text-right">CGST Amt (₹)</th>
+                                        <th className="px-1 py-3 w-[7%] text-right">SGST Amt (₹)</th>
                                     </>
                                 ) : (
                                     <>
                                         <th className="px-1 py-3 w-[8%] text-center">IGST %</th>
-                                        <th className="px-1 py-3 w-[9%] text-right">IGST Amt</th>
+                                        <th className="px-1 py-3 w-[9%] text-right">IGST Amt (₹)</th>
                                     </>
                                 )}
-                                <th className="px-2 py-3 w-[9%] text-right">Total</th>
+                                <th className="px-2 py-3 w-[9%] text-right">Total (₹)</th>
                                 <th className="p-1 w-[3%] no-print"></th>
                             </tr>
                         </thead>
@@ -1257,7 +910,9 @@ const App: React.FC = () => {
                                             <td className="px-1 py-2"><EditableField value={subItem.hsn} onChange={(e) => handleSubItemChange(item.id, subItem.id, 'hsn', e.target.value)} className="w-full" /></td>
                                             <td className="px-1 py-2 text-right"><EditableNullableNumberField value={subItem.qty} onChange={(val) => handleSubItemChange(item.id, subItem.id, 'qty', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} /></td>
                                             <td className="px-1 py-2"><EditableField value={subItem.unit} onChange={(e) => handleSubItemChange(item.id, subItem.id, 'unit', e.target.value)} className="w-full" /></td>
-                                            <td className="px-2 py-2 text-right"><EditableNumberField value={subItem.price} onChange={(val) => handleSubItemChange(item.id, subItem.id, 'price', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} /></td>
+                                            <td className="px-2 py-2 text-right">
+                                                <EditableNumberField value={subItem.price} onChange={(val) => handleSubItemChange(item.id, subItem.id, 'price', val)} className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0} />
+                                            </td>
                                             <td className="px-2 py-2 text-right font-medium">{subItem.itemAmount}</td>
                                             {isIntraState ? (
                                                 <>
@@ -1305,6 +960,83 @@ const App: React.FC = () => {
                                 </React.Fragment>
                             ))}
                         </tbody>
+                        <tfoot>
+                            <tr className="border-t-2 font-bold text-gray-800 bg-gray-100">
+                                <td className="px-2 py-3 text-right" colSpan={6}>
+                                    Total
+                                </td>
+                                <td className="px-2 py-3 text-right">{calculations.subtotal}</td>
+                                {isIntraState ? (
+                                    <>
+                                        <td className="px-1 py-3"></td> {/* Empty cell for Tax % */}
+                                        <td className="px-1 py-3 text-right">{calculations.totalCgst}</td>
+                                        <td className="px-1 py-3 text-right">{calculations.totalSgst}</td>
+                                    </>
+                                ) : (
+                                    <>
+                                        <td className="px-1 py-3"></td> {/* Empty cell for IGST % */}
+                                        <td className="px-1 py-3 text-right">{calculations.totalIgst}</td>
+                                    </>
+                                )}
+                                <td className="px-2 py-3 text-right">{calculations.grandTotal}</td>
+                                <td className="p-1 no-print"></td> {/* Empty cell for delete button column */}
+                            </tr>
+
+                            {postTaxItems.map(item => (
+                                <tr key={item.id} className="border-t">
+                                    <td colSpan={isIntraState ? 10 : 9} className="px-2 py-2 text-right">
+                                        <div className="flex justify-end items-center">
+                                            <EditableField 
+                                                value={item.name} 
+                                                onChange={(e) => handlePostTaxItemChange(item.id, 'name', e.target.value)}
+                                                className="text-right w-48 font-semibold"
+                                                placeholder="Adjustment Name"
+                                            />
+                                            <select 
+                                                value={item.operation} 
+                                                onChange={(e) => handlePostTaxItemChange(item.id, 'operation', e.target.value as 'add' | 'subtract')}
+                                                className="bg-transparent ml-2 p-1 font-semibold focus:outline-none focus:bg-blue-50/50 rounded-md"
+                                            >
+                                                <option value="add">+</option>
+                                                <option value="subtract">-</option>
+                                            </select>
+                                        </div>
+                                    </td>
+                                    <td className="px-2 py-2 text-right">
+                                        <EditableNumberField 
+                                            value={item.amount}
+                                            onChange={(val) => handlePostTaxItemChange(item.id, 'amount', val)}
+                                            className="w-full text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md"
+                                            decimalPlaces={0}
+                                        />
+                                    </td>
+                                    <td className="p-1 text-center no-print">
+                                        <button onClick={() => removePostTaxItem(item.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100">
+                                            <TrashIcon className="h-5 w-5" />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+
+                            <tr className="no-print">
+                                <td colSpan={isIntraState ? 12 : 11} className="pt-2 text-right">
+                                    <button onClick={addPostTaxItem} className="flex items-center text-sm font-semibold text-blue-600 hover:text-blue-800 ml-auto">
+                                        <PlusCircleIcon className="h-5 w-5 mr-1" />
+                                        Add/Less Amount
+                                    </button>
+                                </td>
+                            </tr>
+                            
+                            <tr className="border-t-2 font-bold text-gray-900 bg-blue-100">
+                                <td colSpan={isIntraState ? 10 : 9} className="px-2 py-3 text-right text-lg">
+                                    Amount Due
+                                </td>
+                                <td className="px-2 py-3 text-right text-lg">
+                                    ₹{calculations.amountDue}
+                                </td>
+                                <td className="p-1 no-print"></td>
+                            </tr>
+                        </tfoot>
                     </table>
                     <div className="flex justify-start mt-4 no-print">
                         <button onClick={addItem} className="flex items-center text-sm font-semibold text-blue-600 hover:text-blue-800">
@@ -1313,166 +1045,57 @@ const App: React.FC = () => {
                         </button>
                     </div>
                 </section>
-
-                {/* Totals, Bank, Terms */}
-                <section className="mt-6 flex flex-col md:flex-row justify-between gap-8">
-                    <div className="w-full md:w-7/12 flex flex-col gap-4">
-                        <div>
-                            <h4 className="font-semibold text-gray-700 mb-2">Bank Details</h4>
-                            <div className="text-xs text-gray-600 p-2 border border-gray-200 rounded-md space-y-1">
-                                <p><strong className="text-gray-700">Account Name:</strong> GoodPsyche</p>
-                                <p><strong className="text-gray-700">Account No:</strong> 083105501016</p>
-                                <p><strong className="text-gray-700">IFSC:</strong> ICICI0000831</p>
-                                <p><strong className="text-gray-700">BANK:</strong> ICICI Bank</p>
-                                <p><strong className="text-gray-700">Branch:</strong> Laxmi Nagar</p>
-                                <p><strong className="text-gray-700">UPI ID:</strong> goodpsyche.ibz@icici</p>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 className="font-semibold text-gray-700 mb-2">Terms & Conditions</h4>
-                            <EditableTextarea
-                                value={terms}
-                                onChange={(e) => setTerms(e.target.value)}
-                                className="text-xs text-gray-500 w-full p-2 border border-gray-200 rounded-md"
-                            />
-                        </div>
-                    </div>
-                    <div className="w-full md:w-5/12 text-gray-700 text-sm">
-                        <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
-                            {/* Subtotal */}
-                            <span className="py-2 border-b">Subtotal</span>
-                            <span className="font-semibold py-2 border-b text-right">₹ {calculations.subtotal}</span>
-                            
-                            {/* Pre-tax items */}
-                            {preTaxItems.map(item => (
-                                 <React.Fragment key={item.id}>
-                                     <div className="flex items-center py-1">
-                                         <div className="mr-2 flex rounded-md shadow-sm no-print">
-                                            <button
-                                                onClick={() => handlePreTaxItemChange(item.id, 'operation', 'add')}
-                                                title="Add to total"
-                                                className={`px-2 py-0.5 rounded-l-md border border-gray-300 text-sm font-bold focus:outline-none transition-colors ${
-                                                    item.operation === 'add' ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-700 hover:bg-gray-50'
-                                                }`}
-                                            >+</button>
-                                            <button
-                                                onClick={() => handlePreTaxItemChange(item.id, 'operation', 'subtract')}
-                                                title="Subtract from total"
-                                                className={`-ml-px px-2 py-0.5 rounded-r-md border border-gray-300 text-sm font-bold focus:outline-none transition-colors ${
-                                                    item.operation === 'subtract' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-700 hover:bg-gray-50'
-                                                }`}
-                                            >-</button>
-                                        </div>
-                                         <EditableField value={item.name} onChange={e => handlePreTaxItemChange(item.id, 'name', e.target.value)} className="w-24" />
-                                         <button onClick={() => removePreTaxItem(item.id)} className="no-print text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 ml-1">
-                                            <TrashIcon className="h-4 w-4" />
-                                        </button>
-                                     </div>
-                                     <EditableNumberField value={item.amount} onChange={val => handlePreTaxItemChange(item.id, 'amount', Math.abs(val))} className="w-28 text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0}/>
-                                 </React.Fragment>
-                            ))}
-                            <div className="col-span-2 text-left mt-1 no-print">
-                                 <button onClick={addPreTaxItem} className="flex items-center text-xs font-semibold text-blue-600 hover:text-blue-800">
-                                    <PlusCircleIcon className="h-4 w-4 mr-1" />
-                                    Add Pre-Tax Item
-                                </button>
-                            </div>
-                            
-                            {/* Taxable Amount */}
-                            <span className="font-bold py-2 border-t border-b mt-2">Taxable Amount</span>
-                            <span className="font-bold py-2 border-t border-b mt-2 text-right">₹ {calculations.taxableAmount}</span>
-                            
-                             {isIntraState ? (
-                                <>
-                                    <span className="py-2 border-b">Total CGST</span>
-                                    <span className="font-semibold py-2 border-b text-right">₹ {calculations.totalCgst}</span>
-                                    <span className="py-2 border-b">Total SGST</span>
-                                    <span className="font-semibold py-2 border-b text-right">₹ {calculations.totalSgst}</span>
-                                </>
-                            ) : (
-                                <>
-                                    <span className="py-2 border-b">Total IGST</span>
-                                    <span className="font-semibold py-2 border-b text-right">₹ {calculations.totalIgst}</span>
-                                </>
-                            )}
-                            
-                            {/* Grand Total */}
-                            <div className="col-span-2 flex justify-between py-3 my-2 bg-gray-100 px-4 -mx-2 rounded-md font-bold text-gray-800">
-                                <span>Grand Total</span>
-                                <span>₹ {calculations.grandTotal}</span>
-                            </div>
-                            
-                            {/* Post-tax items */}
-                            {postTaxItems.map(item => (
-                                 <React.Fragment key={item.id}>
-                                     <div className="flex items-center py-1">
-                                         <div className="mr-2 flex rounded-md shadow-sm no-print">
-                                            <button
-                                                onClick={() => handlePostTaxItemChange(item.id, 'operation', 'add')}
-                                                title="Add to total"
-                                                className={`px-2 py-0.5 rounded-l-md border border-gray-300 text-sm font-bold focus:outline-none transition-colors ${
-                                                    item.operation === 'add' ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-700 hover:bg-gray-50'
-                                                }`}
-                                            >+</button>
-                                            <button
-                                                onClick={() => handlePostTaxItemChange(item.id, 'operation', 'subtract')}
-                                                title="Subtract from total"
-                                                className={`-ml-px px-2 py-0.5 rounded-r-md border border-gray-300 text-sm font-bold focus:outline-none transition-colors ${
-                                                    item.operation === 'subtract' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-700 hover:bg-gray-50'
-                                                }`}
-                                            >-</button>
-                                        </div>
-                                         <EditableField value={item.name} onChange={e => handlePostTaxItemChange(item.id, 'name', e.target.value)} className="w-24" />
-                                         <button onClick={() => removePostTaxItem(item.id)} className="no-print text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 ml-1">
-                                            <TrashIcon className="h-4 w-4" />
-                                        </button>
-                                     </div>
-                                     <EditableNumberField value={item.amount} onChange={val => handlePostTaxItemChange(item.id, 'amount', Math.abs(val))} className="w-28 text-right bg-transparent p-1 focus:outline-none focus:bg-blue-50/50 rounded-md" decimalPlaces={0}/>
-                                 </React.Fragment>
-                            ))}
-                            <div className="col-span-2 text-left mt-1 no-print">
-                                 <button onClick={addPostTaxItem} className="flex items-center text-xs font-semibold text-blue-600 hover:text-blue-800">
-                                    <PlusCircleIcon className="h-4 w-4 mr-1" />
-                                    Add Post-Tax Item
-                                </button>
-                            </div>
-
-                            {/* Amount Due */}
-                            <div className="col-span-2 flex justify-between py-3 mt-2 bg-blue-100 px-4 -mx-2 rounded-md font-bold text-lg text-blue-800">
-                                <span>Amount Due</span>
-                                <span>₹ {calculations.amountDue}</span>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                {/* Amount in Words */}
-                <section className="mt-8 pt-4 border-t border-gray-200">
-                    <p className="text-sm text-gray-600">
-                        Amount in Words: <span className="font-semibold text-gray-800">{`Rupees ${numberToWords(calculations.amountDueRounded)}`}</span>
-                    </p>
-                </section>
                 
-                {/* Footer */}
-                <footer className="mt-10 pt-6 border-t-2 border-gray-200 flex justify-end">
-                    <div className="text-center w-full max-w-xs">
-                         <h4 className="font-semibold text-gray-700">For GOODPSYCHE</h4>
-                         <div className="h-24 mt-4">
-                            {/* Empty space for signature */}
-                         </div>
-                         <div className="border-t-2 mt-2 pt-1">
-                             <p className="font-semibold text-gray-800">Authorised Signatory</p>
-                         </div>
+                {/* Footer section with Terms, Bank Details etc. */}
+                <section className="mt-8 pt-4 border-t-2 border-gray-200">
+                    <div className="mb-6">
+                        <p className="text-sm text-gray-600">
+                            Amount in Words: <span className="font-semibold text-gray-800">{`Rupees ${numberToWords(calculations.amountDueRounded)}`}</span>
+                        </p>
                     </div>
-                </footer>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12">
+                        {/* Left Column: Terms & Bank Details */}
+                        <div>
+                             <div className="mb-6">
+                                <h4 className="font-semibold text-gray-700 mb-2">Bank Details</h4>
+                                <div className="text-xs text-gray-600 p-2 border border-gray-200 rounded-md grid grid-cols-2 gap-x-6 gap-y-1">
+                                    <p><strong className="text-gray-700">Account Name:</strong> GoodPsyche</p>
+                                    <p><strong className="text-gray-700">Account No:</strong> 083105501016</p>
+                                    <p><strong className="text-gray-700">BANK:</strong> ICICI Bank</p>
+                                    <p><strong className="text-gray-700">IFSC:</strong> ICICI0000831</p>
+                                    <p><strong className="text-gray-700">Branch:</strong> Laxmi Nagar</p>
+                                    <p><strong className="text-gray-700">UPI ID:</strong> goodpsyche.ibz@icici</p>
+                                </div>
+                            </div>
+                            <div>
+                                <h4 className="font-semibold text-gray-700 mb-2">Terms & Conditions</h4>
+                                <EditableTextarea
+                                    value={terms}
+                                    onChange={(e) => setTerms(e.target.value)}
+                                    className="text-xs text-gray-500 w-full p-2 border border-gray-200 rounded-md"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Right Column: Signature */}
+                        <div className="flex justify-end items-end mt-8 md:mt-0">
+                            <div className="text-center w-full max-w-xs">
+                                 <h4 className="font-semibold text-gray-700">For GOODPSYCHE</h4>
+                                 <div className="h-24 mt-4">
+                                    {/* Empty space for signature */}
+                                 </div>
+                                 <div className="border-t-2 mt-2 pt-1">
+                                     <p className="font-semibold text-gray-800">Authorised Signatory</p>
+                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
              {/* Action Buttons */}
             <div className="max-w-5xl mx-auto mt-6 flex justify-end items-center space-x-3 no-print">
                 <button onClick={handleReset} className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                     <ArrowUturnLeftIcon className="h-5 w-5 mr-2"/> Reset
-                </button>
-                <button onClick={handleExportPdf} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                    <ArchiveBoxArrowDownIcon className="h-5 w-5 mr-2"/> Export PDF
                 </button>
                 <button onClick={handlePrint} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                      <PrinterIcon className="h-5 w-5 mr-2"/> Print
