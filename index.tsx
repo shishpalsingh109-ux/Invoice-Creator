@@ -1028,10 +1028,10 @@ const App: React.FC = () => {
                             </tr>
                             
                             <tr className="border-t-2 font-bold text-gray-900 bg-blue-100">
-                                <td colSpan={isIntraState ? 10 : 9} className="px-2 py-3 text-right text-lg">
+                                <td colSpan={isIntraState ? 9 : 8} className="px-2 py-3 text-right text-lg">
                                     Amount Due
                                 </td>
-                                <td className="px-2 py-3 text-right text-lg">
+                                <td colSpan={2} className="px-2 py-3 text-right text-lg">
                                     ₹{calculations.amountDue}
                                 </td>
                                 <td className="p-1 no-print"></td>
