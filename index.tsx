@@ -941,7 +941,7 @@ const App: React.FC = () => {
                                         {/* Sub-item Group Total Row */}
                                         <tr className="border-b font-bold text-gray-800 bg-gray-50 align-top">
                                             <td className="px-2 py-2 text-center"></td>
-                                            <td className="px-2 py-2 text-right" colSpan={isIntraState ? 7 : 6}>
+                                            <td className="px-2 py-2 text-right" colSpan={7}>
                                                 Group Total for {item.name}
                                             </td>
                                             {isIntraState ? (
