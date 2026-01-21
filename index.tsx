@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useCallback, ChangeEvent, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { PlusCircleIcon, TrashIcon, ArrowUturnLeftIcon, PrinterIcon } from '@heroicons/react/24/solid';
@@ -342,7 +343,6 @@ const App: React.FC = () => {
     const [invoiceTitle, setInvoiceTitle] = useState(getInitialState().invoiceTitle);
     const [invoiceSubtitle, setInvoiceSubtitle] = useState(getInitialState().invoiceSubtitle);
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
-    const [gstinErrors, setGstinErrors] = useState({ billedTo: '', shippedTo: '' });
 
     const prevBilledToRef = useRef(billedTo);
     
@@ -356,22 +356,6 @@ const App: React.FC = () => {
         }, 3000);
     };
     
-    // --- VALIDATION ---
-    const validateGstin = (gstin: string): string => {
-        if (!gstin) return 'GSTIN cannot be empty.';
-        const gstinRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}[A-Z]{2}$/;
-        const stateCode = gstin.substring(0, 2);
-
-        if (!gstinRegex.test(gstin)) {
-            return "Invalid GSTN/UIN format.";
-        }
-        if (!stateCodeMap[stateCode]) {
-            return "Invalid state code in GSTIN.";
-        }
-
-        return '';
-    };
-
     // Auto-fill Shipped to details from Billed to details (with manual override)
     useEffect(() => {
         const prevBilledTo = prevBilledToRef.current;
@@ -381,10 +365,10 @@ const App: React.FC = () => {
         prevBilledToRef.current = billedTo;
     }, [billedTo, shippedTo]);
 
-    // Auto-update Place of Supply from Billed To GSTIN
+    // Auto-update Place of Supply from Billed To GSTIN (Simple check)
     useEffect(() => {
         const gstin = billedTo.gstin;
-        if (validateGstin(gstin) === '') { // An empty string from validateGstin means it's valid
+        if (gstin && gstin.length >= 2) {
             const stateCode = gstin.substring(0, 2);
             const stateName = stateCodeMap[stateCode];
             if (stateName) {
@@ -436,18 +420,12 @@ const App: React.FC = () => {
             setPostTaxItems(initialState.postTaxItems);
             setInvoiceTitle(initialState.invoiceTitle);
             setInvoiceSubtitle(initialState.invoiceSubtitle);
-            setGstinErrors({ billedTo: '', shippedTo: '' });
             showNotification('Invoice has been reset.', 'info');
         }
     };
     
     const handleGstinChange = (party: 'billedTo' | 'shippedTo', value: string) => {
         const upperValue = value.toUpperCase();
-        // Allow empty string without error, but validate if not empty
-        const error = upperValue ? validateGstin(upperValue) : '';
-
-        setGstinErrors(prev => ({ ...prev, [party]: error }));
-
         if (party === 'billedTo') {
             setBilledTo(prev => ({ ...prev, gstin: upperValue }));
         } else {
@@ -744,11 +722,10 @@ const App: React.FC = () => {
                                         type="text"
                                         value={billedTo.gstin}
                                         onChange={(e) => handleGstinChange('billedTo', e.target.value)}
-                                        className={`bg-transparent p-1 w-full focus:outline-none focus:bg-blue-50/50 rounded-md transition-colors text-sm text-gray-800 uppercase ${gstinErrors.billedTo ? 'border border-red-500' : 'border-b border-transparent'}`}
+                                        className="bg-transparent p-1 w-full focus:outline-none focus:bg-blue-50/50 rounded-md transition-colors text-sm text-gray-800 uppercase"
                                         maxLength={15}
                                     />
                                 </div>
-                                {gstinErrors.billedTo && <p className="text-red-500 text-xs mt-1 ml-2">{gstinErrors.billedTo}</p>}
                             </div>
                          </div>
                          <div>
@@ -762,11 +739,10 @@ const App: React.FC = () => {
                                         type="text"
                                         value={shippedTo.gstin}
                                         onChange={(e) => handleGstinChange('shippedTo', e.target.value)}
-                                        className={`bg-transparent p-1 w-full focus:outline-none focus:bg-blue-50/50 rounded-md transition-colors text-sm text-gray-800 uppercase ${gstinErrors.shippedTo ? 'border border-red-500' : 'border-b border-transparent'}`}
+                                        className="bg-transparent p-1 w-full focus:outline-none focus:bg-blue-50/50 rounded-md transition-colors text-sm text-gray-800 uppercase"
                                         maxLength={15}
                                     />
                                 </div>
-                                {gstinErrors.shippedTo && <p className="text-red-500 text-xs mt-1 ml-2">{gstinErrors.shippedTo}</p>}
                             </div>
                          </div>
                     </div>
