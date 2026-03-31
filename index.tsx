@@ -328,9 +328,14 @@ const App: React.FC = () => {
         }] as InvoiceItem[],
         preTaxItems: [] as AdjustmentItem[],
         postTaxItems: [] as AdjustmentItem[],
-        terms: `1. Goods/Services once sold/provided will not be taken back.\n2. Interest @ 18% p.a. will be charged if the payment is not made within the stipulated time.\n3. Subject to 'Delhi' Jurisdiction only.`,
+        terms: `1. Goods/Services once sold/provided will not be taken back.\n2. Interest @ 18% p.a. will be charged if the payment is not made within the stipulated time.\n3. All disputes arising out of this invoice are subject to the exclusive jurisdiction of the courts in Delhi only.`,
         invoiceTitle: 'Tax Invoice',
         invoiceSubtitle: 'Original Copy',
+        firmDetails: {
+            name: 'GOODPSYCHE',
+            address: 'Basement M-29, Vinoba Puri, Near Round Park Near Parking, Lajpat Nagar New Delhi South East Delhi, 110024',
+            gstin: '07AAWFG0897P1ZA'
+        },
     });
 
     const [invoiceDetails, setInvoiceDetails] = useState(getInitialState().invoiceDetails);
@@ -342,6 +347,7 @@ const App: React.FC = () => {
     const [terms, setTerms] = useState(getInitialState().terms);
     const [invoiceTitle, setInvoiceTitle] = useState(getInitialState().invoiceTitle);
     const [invoiceSubtitle, setInvoiceSubtitle] = useState(getInitialState().invoiceSubtitle);
+    const [firmDetails, setFirmDetails] = useState(getInitialState().firmDetails);
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
     const prevBilledToRef = useRef(billedTo);
@@ -420,6 +426,7 @@ const App: React.FC = () => {
             setPostTaxItems(initialState.postTaxItems);
             setInvoiceTitle(initialState.invoiceTitle);
             setInvoiceSubtitle(initialState.invoiceSubtitle);
+            setFirmDetails(initialState.firmDetails);
             showNotification('Invoice has been reset.', 'info');
         }
     };
@@ -685,14 +692,28 @@ const App: React.FC = () => {
             <div className="max-w-5xl mx-auto bg-white shadow-2xl rounded-lg p-6 sm:p-10 print-container">
                 {/* Header */}
                 <header className="flex justify-between items-start pb-4 border-b-2 border-gray-200">
-                    <div className="text-left">
-                        <h1 className="text-2xl font-bold text-gray-800 tracking-wider">GOODPSYCHE</h1>
-                        <p className="text-sm text-gray-500 max-w-xs">
-                            Basement M-29, Vinoba Puri, Near Round Park Near Parking, Lajpat Nagar New Delhi South East Delhi, 110024
-                        </p>
-                        <p className="text-sm text-gray-600 mt-2">
-                            <span className="font-semibold">GSTIN:</span> 07AAWFG0897P1ZA
-                        </p>
+                    <div className="text-left w-full max-w-md">
+                        <EditableField
+                            value={firmDetails.name}
+                            onChange={(e) => setFirmDetails({ ...firmDetails, name: e.target.value })}
+                            className="text-2xl font-bold text-gray-800 tracking-wider w-full"
+                            placeholder="Firm Name"
+                        />
+                        <EditableTextarea
+                            value={firmDetails.address}
+                            onChange={(e) => setFirmDetails({ ...firmDetails, address: e.target.value })}
+                            className="text-sm text-gray-500 w-full"
+                            placeholder="Firm Address"
+                        />
+                        <div className="flex items-center text-sm text-gray-600 mt-2">
+                            <span className="font-semibold mr-2">GSTIN:</span>
+                            <EditableField
+                                value={firmDetails.gstin}
+                                onChange={(e) => setFirmDetails({ ...firmDetails, gstin: e.target.value.toUpperCase() })}
+                                className="w-full"
+                                placeholder="Firm GSTIN"
+                            />
+                        </div>
                     </div>
                     <div className="text-right">
                         <EditableField
@@ -782,8 +803,7 @@ const App: React.FC = () => {
                                 <th className="px-1 py-3 w-[5%] text-right">Qty</th>
                                 <th className="px-1 py-3 w-[6%]">Unit</th>
                                 <th className="px-2 py-3 w-[8%] text-right">Price (₹)</th>
-                                <th className="px-2 py-3 w-[8%] text-right">Amount (₹)</th>
-                                {isIntraState ? (
+                                <th className="px-2 py-3 w-[8%] text-right">Amount (₹)</th>{isIntraState ? (
                                     <>
                                         <th className="px-1 py-3 w-[6%] text-center">Tax %</th>
                                         <th className="px-1 py-3 w-[7%] text-right">CGST Amt (₹)</th>
@@ -794,8 +814,7 @@ const App: React.FC = () => {
                                         <th className="px-1 py-3 w-[8%] text-center">IGST %</th>
                                         <th className="px-1 py-3 w-[9%] text-right">IGST Amt (₹)</th>
                                     </>
-                                )}
-                                <th className="px-2 py-3 w-[9%] text-right">Total (₹)</th>
+                                )}<th className="px-2 py-3 w-[9%] text-right">Total (₹)</th>
                                 <th className="p-1 w-[3%] no-print"></th>
                             </tr>
                         </thead>
@@ -910,25 +929,21 @@ const App: React.FC = () => {
                                     ))}
                                     {item.subItems.length > 0 && (
                                         <>
-                                        {/* Visual space after sub-item group */}
                                         <tr className="h-2 no-print">
                                             <td colSpan={isIntraState ? 12 : 11}></td>
                                         </tr>
-                                        {/* Sub-item Group Total Row */}
                                         <tr className="border-b font-bold text-gray-800 bg-gray-50 align-top">
                                             <td className="px-2 py-2 text-center"></td>
                                             <td className="px-2 py-2 text-right" colSpan={7}>
                                                 Group Total for {item.name}
-                                            </td>
-                                            {isIntraState ? (
+                                            </td>{isIntraState ? (
                                                 <>
                                                     <td className="px-1 py-2 text-right">{item.mainItemCgst}</td>
                                                     <td className="px-1 py-2 text-right">{item.mainItemSgst}</td>
                                                 </>
                                             ) : (
                                                 <td className="px-1 py-2 text-right">{item.mainItemIgst}</td>
-                                            )}
-                                            <td className="px-2 py-2 text-right">{item.totalAmount}</td>
+                                            )}<td className="px-2 py-2 text-right">{item.totalAmount}</td>
                                             <td className="p-1 text-center no-print"></td>
                                         </tr>
                                         </>
@@ -941,24 +956,20 @@ const App: React.FC = () => {
                                 <td className="px-2 py-3 text-right" colSpan={6}>
                                     Total
                                 </td>
-                                <td className="px-2 py-3 text-right">{calculations.subtotal}</td>
-                                {isIntraState ? (
+                                <td className="px-2 py-3 text-right">{calculations.subtotal}</td>{isIntraState ? (
                                     <>
-                                        <td className="px-1 py-3"></td> {/* Empty cell for Tax % */}
+                                        <td className="px-1 py-3"></td>
                                         <td className="px-1 py-3 text-right">{calculations.totalCgst}</td>
                                         <td className="px-1 py-3 text-right">{calculations.totalSgst}</td>
                                     </>
                                 ) : (
                                     <>
-                                        <td className="px-1 py-3"></td> {/* Empty cell for IGST % */}
+                                        <td className="px-1 py-3"></td>
                                         <td className="px-1 py-3 text-right">{calculations.totalIgst}</td>
                                     </>
-                                )}
-                                <td className="px-2 py-3 text-right">{calculations.grandTotal}</td>
-                                <td className="p-1 no-print"></td> {/* Empty cell for delete button column */}
-                            </tr>
-
-                            {postTaxItems.map(item => (
+                                )}<td className="px-2 py-3 text-right">{calculations.grandTotal}</td>
+                                <td className="p-1 no-print"></td>
+                            </tr>{postTaxItems.map(item => (
                                 <tr key={item.id} className="border-t">
                                     <td colSpan={isIntraState ? 10 : 9} className="px-2 py-2 text-right">
                                         <div className="flex justify-end items-center">
@@ -992,18 +1003,14 @@ const App: React.FC = () => {
                                         </button>
                                     </td>
                                 </tr>
-                            ))}
-
-                            <tr className="no-print">
+                            ))}<tr className="no-print">
                                 <td colSpan={isIntraState ? 12 : 11} className="pt-2 text-right">
                                     <button onClick={addPostTaxItem} className="flex items-center text-sm font-semibold text-blue-600 hover:text-blue-800 ml-auto">
                                         <PlusCircleIcon className="h-5 w-5 mr-1" />
                                         Add/Less Amount
                                     </button>
                                 </td>
-                            </tr>
-                            
-                            <tr className="border-t-2 font-bold text-gray-900 bg-blue-100">
+                            </tr><tr className="border-t-2 font-bold text-gray-900 bg-blue-100">
                                 <td colSpan={isIntraState ? 9 : 8} className="px-2 py-3 text-right text-lg">
                                     Amount Due
                                 </td>
@@ -1056,7 +1063,7 @@ const App: React.FC = () => {
                         {/* Right Column: Signature */}
                         <div className="flex justify-end items-end mt-8 md:mt-0">
                             <div className="text-center w-full max-w-xs">
-                                 <h4 className="font-semibold text-gray-700">For GOODPSYCHE</h4>
+                                 <h4 className="font-semibold text-gray-700 uppercase">For {firmDetails.name}</h4>
                                  <div className="h-24 mt-4">
                                     {/* Empty space for signature */}
                                  </div>
