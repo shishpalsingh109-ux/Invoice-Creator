@@ -332,7 +332,8 @@ const App: React.FC = () => {
         invoiceTitle: 'Tax Invoice',
         invoiceSubtitle: 'Original Copy',
         firmDetails: {
-            name: 'GOODPSYCHE',
+            legalName: 'GOODPSYCHE',
+            tradeName: '',
             address: 'Basement M-29, Vinoba Puri, Near Round Park Near Parking, Lajpat Nagar New Delhi South East Delhi, 110024',
             gstin: '07AAWFG0897P1ZA'
         },
@@ -693,12 +694,23 @@ const App: React.FC = () => {
                 {/* Header */}
                 <header className="flex justify-between items-start pb-4 border-b-2 border-gray-200">
                     <div className="text-left w-full max-w-md">
-                        <EditableField
-                            value={firmDetails.name}
-                            onChange={(e) => setFirmDetails({ ...firmDetails, name: e.target.value })}
-                            className="text-2xl font-bold text-gray-800 tracking-wider w-full"
-                            placeholder="Firm Name"
-                        />
+                        <div className="flex flex-wrap items-baseline gap-x-4">
+                            <EditableField
+                                value={firmDetails.legalName}
+                                onChange={(e) => setFirmDetails({ ...firmDetails, legalName: e.target.value })}
+                                className="text-2xl font-bold text-gray-800 tracking-wider"
+                                placeholder="Legal Name"
+                            />
+                            <div className="flex items-center text-gray-500 text-lg italic">
+                                {firmDetails.tradeName && <span className="mr-1">T/A</span>}
+                                <EditableField
+                                    value={firmDetails.tradeName}
+                                    onChange={(e) => setFirmDetails({ ...firmDetails, tradeName: e.target.value })}
+                                    className="font-semibold"
+                                    placeholder="+ Trade Name"
+                                />
+                            </div>
+                        </div>
                         <EditableTextarea
                             value={firmDetails.address}
                             onChange={(e) => setFirmDetails({ ...firmDetails, address: e.target.value })}
@@ -1063,7 +1075,7 @@ const App: React.FC = () => {
                         {/* Right Column: Signature */}
                         <div className="flex justify-end items-end mt-8 md:mt-0">
                             <div className="text-center w-full max-w-xs">
-                                 <h4 className="font-semibold text-gray-700 uppercase">For {firmDetails.name}</h4>
+                                 <h4 className="font-semibold text-gray-700 uppercase">For {firmDetails.legalName} {firmDetails.tradeName ? `(${firmDetails.tradeName})` : ''}</h4>
                                  <div className="h-24 mt-4">
                                     {/* Empty space for signature */}
                                  </div>
