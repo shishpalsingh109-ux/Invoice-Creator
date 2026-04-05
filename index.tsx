@@ -702,12 +702,11 @@ const App: React.FC = () => {
                                 placeholder="Legal Name"
                             />
                             <div className="flex items-center text-gray-500 text-lg italic">
-                                {firmDetails.tradeName && <span className="mr-1">T/A</span>}
                                 <EditableField
                                     value={firmDetails.tradeName}
                                     onChange={(e) => setFirmDetails({ ...firmDetails, tradeName: e.target.value })}
                                     className="font-semibold"
-                                    placeholder="+ Trade Name"
+                                    placeholder=""
                                 />
                             </div>
                         </div>
